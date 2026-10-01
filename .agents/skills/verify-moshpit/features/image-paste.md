@@ -11,6 +11,7 @@ The Chat and Terminal composers accept one PNG, JPEG, WebP, or GIF up to 10 MB t
 - The browser sends actual bytes to the paired bridge. The bridge checks size and image signatures, writes a private file in its uploads directory, and includes the host path in the agent prompt.
 - Terminal preserves literal text and sends the image path with a separate Enter. An image-only send adds `Please inspect this image.` before the path.
 - Rejected or failed sends keep the draft and image for retry.
+- Delivery errors remain visible alongside draft-storage warnings. If device storage fails, the draft stays in memory and can still be retried.
 - Uploaded images render inline in native chat history. Tap one to open it full-size. Previews survive reload because the bridge serves the saved image with the same authentication as session history. Missing files show "Image unavailable".
 - Only files in the bridge uploads directory can be previewed. Arbitrary local paths and remote Markdown images are not fetched.
 

@@ -570,6 +570,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </div>
       </div>
     </div>
-    {(saved.error || draft.submission || unavailable) && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{saved.error || (busy ? "Sending…" : draft.submission?.message) || (unavailable ? "Reconnect to send. Your draft stays on this device." : "")}</p>}
+    {(draft.submission || unavailable) && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{(busy ? "Sending…" : draft.submission?.message) || (unavailable ? "Reconnect to send. Your draft stays on this device." : "")}</p>}
+    {saved.error && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{saved.error}</p>}
   </div>;
 }
