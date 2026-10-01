@@ -1,8 +1,7 @@
-import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
-import { layoutFor, WIDE_MIN_PX, type Layout, type LayoutRegime } from "./layout";
+import { useEffect, useSyncExternalStore } from "react";
+import { layoutFor, WIDE_MIN_PX, type LayoutRegime } from "./layout";
+import { LayoutContext } from "./use-layout";
 import { useMoshpitStore } from "./store";
-
-const LayoutContext = createContext<Layout | null>(null);
 
 const QUERY = `(min-width: ${WIDE_MIN_PX}px)`;
 
@@ -34,10 +33,3 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
   return <LayoutContext.Provider value={layout}>{children}</LayoutContext.Provider>;
 }
-
-export function useLayout(): Layout {
-  const layout = useContext(LayoutContext);
-  if (!layout) throw new Error("useLayout must be used inside LayoutProvider");
-  return layout;
-}
-

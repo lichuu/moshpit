@@ -16,7 +16,7 @@
     "verify:live-detail": "npm run build:spa && node .agents/skills/verify-moshpit/helpers/check-live-detail.mjs",
     "verify:upload": "npm run build && node .agents/skills/verify-moshpit/helpers/check-upload.mjs",
     "verify:chat-upload": "node .agents/skills/verify-moshpit/helpers/check-chat-upload.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "verify:session-review": "node --test bridge/submissions.test.mjs bridge/write-routing.test.mjs bridge/sessions.test.mjs bridge/native-input.test.mjs && node .agents/skills/verify-moshpit/helpers/check-session-review.mjs",
     "test:node": "node scripts/node-checks.mjs",
