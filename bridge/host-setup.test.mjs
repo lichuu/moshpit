@@ -22,6 +22,8 @@ const OWNER = "dana@example.com";
 const USER = "dana";
 const VERSION = "v1.2.3";
 const NOW = "2026-09-26T00:00:00.000Z";
+// The bottom edge of a QR finder square, present in every rendered code.
+const QR = /█▄▄▄▄▄█/;
 
 function makeHost(overrides = {}) {
   const host = {
@@ -978,7 +980,7 @@ test("on a terminal a fresh host issues one grant, prints the link and a QR, and
   assert.deepEqual(grantsOf(m.host).map((call) => [call.name, call.stateDir]), [["First browser", `${m.env.XDG_STATE_HOME}/moshpit`]]);
   const [secret] = m.host.grants;
   assert.ok(run.stdout.includes(`  ${LINK_PREFIX}${secret}\n`), run.stdout);
-  assert.match(run.stdout, /[▀▄█]{10}/, "a terminal QR follows the link");
+  assert.match(run.stdout, QR, "a terminal QR follows the link");
   assert.match(run.stderr, /Waiting for the browser: 5:00 left/);
   assert.match(run.stderr, /4:56 left/);
   assert.deepEqual(sleeps, [2000, 2000, 2000], "polls every 2 s and stops at the approval");
@@ -1015,7 +1017,7 @@ test("with a display and no SSH session, setup opens the link in a local browser
     assert.ok(launch.page.includes(`location.replace(${JSON.stringify(link)})`), launch.page);
     assert.equal(existsSync(launch.target), false, "the page is removed when the wait ends");
     assert.ok(run.stdout.includes(`  ${link}\n`), "the link is printed too");
-    assert.match(run.stdout, /[▀▄█]{10}/, "and the QR");
+    assert.match(run.stdout, QR, "and the QR");
     assert.doesNotMatch(run.stdout, /Could not open a browser/);
     assert.match(run.stdout, /^state: complete$/m);
     assert.deepEqual(m.host.mutations, FRESH_MUTATIONS, "opening a browser is not a host change");
@@ -1247,7 +1249,7 @@ test("on a terminal --json carries the link and prints it with the QR on stderr"
   assert.equal(result.state, "complete");
   assert.equal(result.setupLink, `${LINK_PREFIX}${m.host.grants[0]}`);
   assert.ok(run.stderr.includes(result.setupLink));
-  assert.match(run.stderr, /[▀▄█]{10}/);
+  assert.match(run.stderr, QR);
 });
 
 test("a rerun while awaiting the first device issues a fresh grant", async (t) => {
