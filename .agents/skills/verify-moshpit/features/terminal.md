@@ -8,7 +8,8 @@ Terminal is one of the three views inside an agent detail. It shows an ANSI-rend
 - `Quick replies` is a key-bar button beside `Aa` in Terminal (Chat keeps its collapsible row). It opens a popover region named `Quick replies`; a tap sends that reply to the pane and closes the popover.
 - `Display options` (the `Aa` button at the end of the key bar) opens a popover with `Wrap long lines` and `Text size S/M/L`. Both persist. Escape or a tap outside closes it without sending anything to the pane. On a phone the key strip scrolls and fades at its right edge while more keys are past it.
 - The Settings `herdr prefix` input accepts `ctrl+<letter>` and defaults to `ctrl+b`. The `^A` through `^D` buttons set common values. The key bar, swipe action, hint, and toasts use the saved value. An invalid draft does not change the store. Run `helpers/check-prefix.mjs <port> [screenshot]` to verify these paths.
-- Terminal uses the shared composer with accessible name `Terminal input`. Dictate inserts speech into the draft. Send passes literal text and a separate Enter through the terminal connection. Shift+Enter inserts a newline. An empty Send sends Enter. The terminal key bar remains separate; image attachments belong to Chat.
+- Terminal uses the shared composer with accessible name `Terminal input`. Dictate inserts speech into the draft. Send passes literal text and a separate Enter through the terminal connection. Shift+Enter inserts a newline. An empty Send sends Enter.
+- `Attach image`, clipboard paste, and drop accept one image through the shared composer. The thumbnail has a `Remove image` button. Send saves the image privately on the host and sends the text and image path, followed by Enter. An image can be sent without text. Failed sends preserve the text and image for retry. See [Image upload](image-paste.md) for limits.
 - When the host is connected but herdr is down, Terminal shows a shell view with a `Start herdr` button. Click the button to restore the pane and reseed the agents.
 - The focused pane follows agent selection; `^C` interrupts the agent (status `idle`).
 - Switching to Chat or Links does not change the selected agent. On a phone, Back returns to the list or Inbox that opened it.
@@ -31,6 +32,7 @@ Preconditions: doctor healthy; onboarded; demo host connected with herdr running
 
 ## Gotchas
 
+- `MOSHPIT_TEST_PORT=4197 MOSHPIT_DEV_PORT=5197 npx playwright test tests/bridge/terminal-typing.spec.ts --project=phone --project=desktop` drives isolated bridges. It checks picker, paste, drop, removal, exact image bytes and permissions, literal text, image-only sends, separate Enter, and failed-send preservation. The picker test attaches a screenshot of the thumbnail.
 - `helpers/check-terminal-send.mjs` checks one-click sends through an isolated bridge, dictation callbacks, onboarding, and simulated keyboard height and offset changes. It does not prove physical iOS keyboard behavior or microphone permissions. It is still written against the pre-refactor three-view UI and needs rework before relying on it.
 
 - A hardware key reaches the pane through `parsePaneKey`, which is a different path from the on-screen key bar. A key-bar check does not cover modifier handling, and `check-pane-modifiers.mjs` does not cover the key bar.

@@ -268,7 +268,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   }
 
   function pickImage(image?: File) {
-    if (!image || terminal || busy) return;
+    if (!image || busy) return;
     if (!IMAGE_TYPES.includes(image.type)) { toast("Choose a PNG, JPEG, WebP, or GIF image."); return; }
     if (!image.size || image.size > MAX_IMAGE_BYTES) { toast("Choose an image smaller than 10 MB."); return; }
     saved.update({ attachment: image });
@@ -384,8 +384,8 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   }
 
   return <div className={`composer-wrap bg-bg ${terminal ? "terminal-composer" : ""}`} onPaste={(event) => {
-    if (!terminal && event.clipboardData.files[0]) { event.preventDefault(); pickImage(event.clipboardData.files[0]); }
-  }} onDragOver={(event) => { if (!terminal && event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); pickImage(event.dataTransfer.files[0]); }}>
+    if (event.clipboardData.files[0]) { event.preventDefault(); pickImage(event.clipboardData.files[0]); }
+  }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); pickImage(event.dataTransfer.files[0]); }}>
     <div className="composer-blocks min-h-0 grow overflow-y-auto">
       {/* An unresolved question card in Chat already shows the prompt and its
           way out, so the banner would only repeat it. */}
@@ -520,7 +520,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         className="block max-h-40 min-h-10 w-full resize-none bg-transparent px-2 py-2 text-base leading-6 outline-none placeholder:text-subtle" />
       <div className="flex items-center gap-1">
         <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
-        {!terminal && <button type="button" aria-label="Attach image" onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted"><Paperclip className="size-4" /></button>}
+        <button type="button" aria-label="Attach image" disabled={busy} onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted disabled:opacity-50"><Paperclip className="size-4" /></button>
         {!terminal && buttonPrefix && <button type="button" aria-label={insertLabel} onClick={() => insertCommandPrefix()} disabled={busy} className="flex size-10 items-center justify-center rounded-lg text-muted"><Slash className="size-4" /></button>}
         <button type="button" aria-label={listening ? "Stop listening" : "Dictate"} aria-pressed={listening} onClick={dictate} disabled={busy} className={`flex size-10 items-center justify-center rounded-lg ${listening ? "text-blocked" : "text-muted"}`}><Mic className="size-4" /></button>
         <details ref={tools} className="relative">

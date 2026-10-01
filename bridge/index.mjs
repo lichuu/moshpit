@@ -121,7 +121,8 @@ const submissions = createSubmissions({
   canonical: (target) => herdr.paneId?.(target) ?? target,
   async prepareAttachment(image, request) {
     const saved = await uploads.save(image);
-    return `${String(request.text).trim() || "Please inspect this image."}\n\nAttached image on this machine: ${JSON.stringify(saved.path)}\nOpen this file to view the image.`;
+    const text = request.mode === "terminal" ? request.text : request.text.trim();
+    return `${text || "Please inspect this image."}\n\nAttached image on this machine: ${JSON.stringify(saved.path)}\nOpen this file to view the image.`;
   },
 });
 await mkdir(STATE_DIR, { recursive: true });

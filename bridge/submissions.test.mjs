@@ -112,6 +112,33 @@ test("attachment preparation happens once after dedupe and rechecks session", as
   assert.equal(calls.length, 1);
 });
 
+test("terminal attachments use the same dedupe and session checks as messages", async (t) => {
+  const { stateDir, herdr, calls } = await setup(t);
+  let uploads = 0;
+  const manager = createSubmissions({ stateDir, herdr, prepareAttachment: async (_attachment, input) => {
+    uploads++;
+    return `${input.text}\n/image.png`;
+  } });
+  const input = request({ mode: "terminal", text: "  literal\ninput  ", attachment: { name: "image.png", type: "image/png", data: "AAAA" } });
+  const [first, second] = await Promise.all([manager.submit(input, "phone"), manager.submit(input, "phone")]);
+  assert.equal(first.state, "delivered");
+  assert.deepEqual(second, first);
+  assert.equal(uploads, 1);
+  assert.deepEqual(calls, [["pane-1", "  literal\ninput  \n/image.png", "terminal"]]);
+
+  const stop = await manager.submit({ ...input, id: randomUUID(), mode: "stop" }, "phone");
+  assert.equal(stop.state, "failed");
+  assert.equal(uploads, 1);
+  assert.equal(calls.length, 1);
+
+  const stale = createSubmissions({ stateDir, herdr, prepareAttachment: async () => {
+    herdr.snapshot = async () => ({ agents: [{ id: "pane-1", sessionId: "session-2" }] });
+    return "image path";
+  } });
+  assert.equal((await stale.submit({ ...input, id: randomUUID() }, "phone")).state, "failed");
+  assert.equal(calls.length, 1);
+});
+
 test("uncertain bridge errors are not reported as failed or replayed", async (t) => {
   const { manager } = await setup(t, { submit: async () => { throw new Error("Lost response after write"); } });
   const input = request();
