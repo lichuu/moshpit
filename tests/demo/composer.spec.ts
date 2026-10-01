@@ -54,6 +54,46 @@ test.describe("composer", () => {
     await expect(demo.getByText("send on the first press", { exact: true })).toBeVisible();
   });
 
+  for (const name of ["Input tools", "Snippets"]) {
+    test(`${name} opens without blurring the composer`, async ({ demo }, testInfo) => {
+      const prompt = demo.getByPlaceholder("Message this agent…");
+      await prompt.fill("Keep this draft");
+      const trigger = demo.getByLabel(name, { exact: true });
+      const content = demo.getByRole("button", { name: name === "Snippets" ? "Close snippets" : "Close input tools" });
+      await prompt.focus();
+      const box = await trigger.boundingBox();
+      expect(box).not.toBeNull();
+      await demo.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await demo.mouse.down();
+      await expect(prompt).toBeFocused();
+      await demo.mouse.up();
+      await expect(content).toBeVisible();
+      await expect(prompt).toBeFocused();
+      await trigger.click();
+      await expect(content).toBeHidden();
+
+      if (isPhone(testInfo)) {
+        await prompt.focus();
+        await trigger.tap();
+        await expect(content).toBeVisible();
+        await expect(prompt).toBeFocused();
+      } else {
+        await trigger.focus();
+        await demo.keyboard.press("Enter");
+        await expect(content).toBeVisible();
+      }
+      if (name === "Snippets") {
+        const input = demo.getByLabel("Snippet name");
+        await input.click();
+        await demo.keyboard.insertText("Review");
+        await expect(input).toHaveValue("Review");
+      }
+      await content.click();
+      await expect(content).toBeHidden();
+      await expect(prompt).toHaveValue("Keep this draft");
+    });
+  }
+
   test("attaches an image, clears it, and sends it as a line", async ({ demo }) => {
     const file = demo.locator('input[type="file"][accept="image/*"]');
     await expect(file).toHaveAttribute("accept", "image/*");

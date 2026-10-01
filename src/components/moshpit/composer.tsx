@@ -524,7 +524,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         {!terminal && buttonPrefix && <button type="button" aria-label={insertLabel} onClick={() => insertCommandPrefix()} disabled={busy} className="flex size-10 items-center justify-center rounded-lg text-muted"><Slash className="size-4" /></button>}
         <button type="button" aria-label={listening ? "Stop listening" : "Dictate"} aria-pressed={listening} onClick={dictate} disabled={busy} className={`flex size-10 items-center justify-center rounded-lg ${listening ? "text-blocked" : "text-muted"}`}><Mic className="size-4" /></button>
         <details ref={tools} className="relative">
-          <summary aria-label="Input tools" className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><Keyboard className="size-4" /></summary>
+          <summary aria-label="Input tools" onMouseDown={(event) => event.preventDefault()} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><Keyboard className="size-4" /></summary>
           <div className="absolute bottom-12 left-0 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
             <div className="mb-1 flex items-center justify-between">
               <p className="text-xs text-muted">Input tools</p>
@@ -537,7 +537,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
           </div>
         </details>
         <details ref={picker} className="relative" onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) snippetSel.current = null; }}>
-          <summary aria-label="Snippets" onClick={captureSelection} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><BookMarked className="size-4" /></summary>
+          <summary aria-label="Snippets" onMouseDown={(event) => event.preventDefault()} onClick={captureSelection} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><BookMarked className="size-4" /></summary>
           <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
             <div className="mb-1 flex items-center justify-between">
               <p className="text-xs text-muted">Snippets</p>
