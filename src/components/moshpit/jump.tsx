@@ -1,5 +1,5 @@
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { StatusPill } from "@/components/moshpit/status-pill";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
