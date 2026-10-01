@@ -178,6 +178,41 @@ test("a rejected terminal image preserves the draft and image for retry", async 
   expect(writes[1]).toEqual(["pane", "send-keys", "w1:p1", "enter"]);
 });
 
+test("an image rejection and a draft storage failure both remain visible for retry", async ({ page, bridge }) => {
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey) {
+      const request = put.call(this, value, key);
+      if (this.name === "drafts") this.transaction.abort();
+      return request;
+    };
+  });
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const input = page.getByRole("textbox", { name: "Terminal input" });
+  await input.fill("keep this draft ");
+  await page.locator('input[type="file"]').setInputFiles({ name: "invalid.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
+  await expect(page.getByRole("img", { name: "Attachment preview: invalid.png", exact: true })).toBeVisible();
+  const response = page.waitForResponse(`${host.url}/api/submit`);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  expect(await (await response).json()).toEqual(expect.objectContaining({ state: "failed", message: "Choose a valid PNG, JPEG, WebP, or GIF image." }));
+  await expect(page.getByRole("status").filter({ hasText: /^Draft is only saved in memory\./ })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Choose a valid PNG, JPEG, WebP, or GIF image." })).toBeVisible();
+  await expect(input).toHaveValue("keep this draft ");
+  await expect(page.getByRole("img", { name: "Attachment preview: invalid.png", exact: true })).toBeVisible();
+  expect(await capturedWrites(host)).toEqual([]);
+
+  await page.locator('input[type="file"]').setInputFiles({ name: "retry.png", mimeType: "image/png", buffer: imageBytes });
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: /^Draft is only saved in memory\./ })).toBeVisible();
+  await expect.poll(async () => (await capturedWrites(host)).length).toBe(2);
+  const writes = await capturedWrites(host);
+  await savedImage(host, writes[0][3], "keep this draft ");
+  expect(writes[1]).toEqual(["pane", "send-keys", "w1:p1", "enter"]);
+});
+
 async function pastePaneImage(page: Page, name: string, onBody = false) {
   const pane = page.getByRole("application", { name: "Pane w1:p1", exact: true });
   await pane.focus();
