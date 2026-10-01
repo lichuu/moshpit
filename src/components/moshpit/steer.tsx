@@ -195,7 +195,9 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
         <Composer
           agent={agent}
           sessionId={sessionId}
-          liveQuestion={available?.entries.some((entry) => entry.kind === "question" && !entry.resolved)}
+          liveQuestion={agent.blockedDialog?.kind === "choose" && agent.blockedDialog.family === "claude-ask-user-review-v1"
+            ? false
+            : available?.entries.some((entry) => entry.kind === "question" && !entry.resolved)}
           capabilities={
             available?.capabilities ?? {
               inputModes: ["send"],

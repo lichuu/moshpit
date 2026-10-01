@@ -17,6 +17,8 @@ On a phone it opens as a drill-in over the current tab, with an icon-only `Back`
 - The special-key bar sends input to the agent's pane. `^C` interrupts the agent and sets its status to `idle`.
 - A `Dictate` button (aria-label `Dictate`) toggles voice input; a blocked agent firing raises a toast.
 - Ask-user question cards appear in Chat when the agent asked a question. A live choose dialog prints the observed keys. Each wizard answer advances to the next blocked step; the final answer releases the demo agent to `working`. Resolved cards retain per-question answers. Multi-select and automatic type-then-verify submission are not implemented. Unread prompts offer `Answer in Terminal` plus the insert-only composer. Use `tests/demo/chat.spec.ts` and `tests/bridge/chat-answer.spec.ts` for wizard and delayed-response lock coverage.
+- Recognized Claude `AskUserQuestion` forms use the same guarded answer path. Only the active question's uniquely matched choices are tappable. Wrapped questions, labels, and descriptions match after whitespace normalization. A tap sends the printed digit without Enter. Multi-question forms require an explicit **Submit answers** tap in the composer after the review appears. One-question forms submit through the ordinary choice. Unread forms, multi-select, Other input, and preview layouts use Terminal.
+- The bridge validates the currently visible form before each answer. A consumed token cannot send another digit while the same form remains visible. Run `tests/bridge/chat-answer.spec.ts` with `--grep 'Claude AskUserQuestion taps'` to check Chat and Inbox choices, wrapping, and explicit review submission.
 
 ## How to get to it (user POV)
 

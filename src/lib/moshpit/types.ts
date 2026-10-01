@@ -144,7 +144,7 @@ export type BlockedDialog =
       sessionId?: string;
       expected: { token: string; signature: string; revision: number | null };
       question: string;
-      step: { index: number; total: number };
+      step: { index: number; total: number } | null;
       options: { key: string; label: string; description?: string }[];
     }
   | { kind: "terminal"; question: string; options: BlockedOption[]; reason?: string };

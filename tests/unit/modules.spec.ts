@@ -401,7 +401,7 @@ test.describe("bridge responses", () => {
 });
 
 test.describe("ask-user option keys", () => {
-  test("codex sends the bare digit; claude and pi keep the submit key", async ({ page }) => {
+  test("codex and claude send the bare digit; pi uses its submit key", async ({ page }) => {
     await page.goto(`${DEV_URL}/`);
 
     const result = await page.evaluate(async (mod) => {
@@ -418,7 +418,7 @@ test.describe("ask-user option keys", () => {
     // Digits and labels are marked text, so the bridge types them rather than
     // guessing; a label reading "Enter" must not press Enter.
     expect(result.codex).toEqual([{ text: "2" }]);
-    expect(result.claude).toEqual([{ text: "2" }, "enter"]);
+    expect(result.claude).toEqual([{ text: "2" }]);
     expect(result.pi).toEqual(["down", "enter"]);
     expect(result.unknown).toEqual([{ text: "green" }, "enter"]);
     expect(result.keyLike).toEqual([{ text: "Enter" }, "enter"]);

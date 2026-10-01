@@ -108,8 +108,9 @@ test("a later terminal dump does not revive a consumed choose token", () => {
   const a = obs.observe({ ...ARG });
   assert.notEqual(obs.consume(TARGET, a.token), null);
   const t = obs.observe({ ...ARG, harness: "claude" }); // non-codex kind → terminal
-  assert.equal(t.token, a.token);
-  assert.equal(t.consumed, true);
+  assert.equal(t, null);
+  assert.equal(obs.peek(TARGET).token, a.token);
+  assert.equal(obs.peek(TARGET).consumed, true);
   assert.equal(obs.consume(TARGET, a.token), null);
 });
 
