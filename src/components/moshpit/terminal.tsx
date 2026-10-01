@@ -7,7 +7,7 @@ import { PaneSurface, type PaneHandle, type PaneStatus, type PaneTarget } from "
 import { extractLinks, linkKey } from "@/lib/moshpit/links";
 import { bridgeUrl } from "@/lib/moshpit/bridge";
 import { projectOf } from "@/lib/moshpit/label";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { draftStore } from "@/lib/moshpit/drafts";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";

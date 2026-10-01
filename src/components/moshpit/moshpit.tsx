@@ -3,7 +3,7 @@ import { AgentIcon } from "@/components/moshpit/agent-icon";
 import { useId, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { groupAgentsByProject, type ProjectGroup } from "@/lib/moshpit/projects";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import {
   blockedCount,
   sortedAgents,

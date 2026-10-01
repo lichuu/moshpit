@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { InstallApp } from "@/components/moshpit/pwa";
 import { AccessRequests, RequestAccess } from "@/components/moshpit/enrollment";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import {
   listDevices,
