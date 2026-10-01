@@ -19,6 +19,7 @@ import type { TermSize } from "@/lib/moshpit/types";
 function keyBar(prefix: string) {
   return [
     "esc",
+    "backspace",
     "ctrl+c",
     "tab",
     "up",
@@ -368,6 +369,7 @@ export function Terminal() {
               <button
                 key={k}
                 type="button"
+                aria-label={k === "backspace" ? "Backspace" : undefined}
                 // Keep focus on the pane so the key bar never interrupts typing.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
@@ -376,7 +378,7 @@ export function Terminal() {
                 }}
                 className="h-9 shrink-0 rounded-sm bg-surface-2 px-2.5 font-mono text-xs text-muted shadow-border"
               >
-                {k.startsWith("ctrl+") ? `^${k.slice(5).toUpperCase()}` : k}
+                {k === "backspace" ? "⌫" : k.startsWith("ctrl+") ? `^${k.slice(5).toUpperCase()}` : k}
               </button>
             ))}
           </div>
