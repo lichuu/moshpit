@@ -118,7 +118,7 @@ test.describe("terminal display options", () => {
     const labels = await demo
       .locator(".terminal-keys button")
       .evaluateAll((els) => els.slice(0, 3).map((el) => el.textContent));
-    expect(labels).toEqual(["esc", "^C", "tab"]);
+    expect(labels).toEqual(["esc", "⌫", "^C"]);
   });
 });
 

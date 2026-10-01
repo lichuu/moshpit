@@ -53,7 +53,7 @@ async function openAgent(page: Page, label: string) {
 
 /** Phones open an agent over the list; wider layouts show both, with no Back. */
 async function back(page: Page) {
-  const button = page.getByRole("button", { name: "Back" });
+  const button = page.getByRole("button", { name: "Back", exact: true });
   if (await button.isVisible()) await button.click();
 }
 
