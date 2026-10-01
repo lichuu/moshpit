@@ -42,7 +42,7 @@ write_files:
   - path: /root/tailscale-authkey
     permissions: "0600"
     content: |
-      tskey-auth-REPLACE-ME
+      REPLACE-ME
 
   # herdr's headless server as a user service, so the bridge has a herdr to drive.
   - path: /home/moshpit/.config/systemd/user/herdr.service
