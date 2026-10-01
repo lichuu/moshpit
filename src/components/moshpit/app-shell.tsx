@@ -8,7 +8,7 @@ import { JumpSheet } from "@/components/moshpit/jump";
 import { Moshpit } from "@/components/moshpit/moshpit";
 import { PrimaryNav } from "@/components/moshpit/primary-nav";
 import { PwaStatus } from "@/components/moshpit/pwa";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 
 function DemoBanner() {

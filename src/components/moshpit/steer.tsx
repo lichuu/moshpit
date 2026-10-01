@@ -2,7 +2,7 @@ import { Power, SquareTerminal } from "lucide-react";
 import { useMemo } from "react";
 import { Composer } from "@/components/moshpit/composer";
 import { Conversation } from "@/components/moshpit/conversation";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { Button } from "@/components/ui/button";
 import { bridgeUrl } from "@/lib/moshpit/bridge";

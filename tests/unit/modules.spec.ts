@@ -4,7 +4,7 @@ import { DEV_URL } from "../../playwright.config";
 // Resolved by vite in the browser, not by tsc, so they are passed as data.
 const DRAFTS = "/src/lib/moshpit/drafts.ts";
 const SESSION = "/src/lib/moshpit/session.ts";
-const MARKDOWN = "/src/components/moshpit/chat-markdown.tsx";
+const LINK_TARGET = "/src/components/moshpit/link-target.ts";
 const KEYS = "/src/lib/moshpit/keys.ts";
 const BRIDGE = "/src/lib/moshpit/bridge.ts";
 const ASK_KEYS = "/src/lib/moshpit/ask-keys.ts";
@@ -273,7 +273,7 @@ test.describe("chat markdown links", () => {
         abs: linkTarget("/home/you/projects/moshpit/README.md"),
         user: linkTarget("https://user:secret@example.com"),
       };
-    }, MARKDOWN);
+    }, LINK_TARGET);
     expect(result.https).toBe("anchor");
     expect(result.http).toBe("anchor");
     expect(result.upload).toBe("image");

@@ -1,19 +1,8 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { HighlightedCode } from "./styled-output";
+import { linkTarget } from "./link-target";
 import { UploadedImage } from "./uploaded-image";
-
-export function linkTarget(href: string | undefined): "anchor" | "image" | "inert" {
-  if (!href) return "inert";
-  if (href.startsWith("/api/upload?path=")) return "image";
-  try {
-    const url = new URL(href);
-    if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password) return "anchor";
-  } catch {
-    return "inert";
-  }
-  return "inert";
-}
 
 export default function ChatMarkdown({ text }: { text: string }) {
   // The bridge includes this marker in both native submissions and legacy prompts.

@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 import { MoshpitMark } from "@/components/moshpit/mark";
-import { useLayout } from "@/lib/moshpit/layout-context";
+import { useLayout } from "@/lib/moshpit/use-layout";
 import { blockedCount, useMoshpitStore } from "@/lib/moshpit/store";
 
 const TITLES = {
