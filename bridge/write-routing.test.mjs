@@ -46,9 +46,19 @@ else console.log('{}');
   await writeFile(path.join(dir, 'package.json'), '{"type":"module"}');
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
-  const child = spawn(...bridgeCommand(), { env: { ...isolatedEnv(), ...boundaryEnv(port), MOSHPIT_BIND: '127.0.0.1', ...await passwordEnv(dir), MOSHPIT_STATE_DIR: path.join(dir, 'state'), MOSHPIT_HERDR_BIN: bin, REVIEW_WRITES: log, REVIEW_CTRL: ctrlLog }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(...bridgeCommand(), { env: { ...isolatedEnv(), ...boundaryEnv(port), MOSHPIT_BIND: '127.0.0.1', ...await passwordEnv(dir), MOSHPIT_STATE_DIR: path.join(dir, 'state'), MOSHPIT_HERDR_BIN: bin, REVIEW_WRITES: log, REVIEW_CTRL: ctrlLog }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  const closed = once(child, 'close');
   let socket;
-  t.after(async () => { socket?.close(); child.kill(); await once(child, 'exit').catch(() => {}); await rm(dir, { recursive: true, force: true }); });
+  t.after(async () => {
+    socket?.close();
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+    await closed;
+    await rm(dir, { recursive: true, force: true });
+  });
   await once(child.stdout, 'data');
   const login = await fetch(`${url}/api/login`, { method:'POST', headers:{'content-type':'application/json',origin:url}, body:JSON.stringify({password:'review-pass'}) }).then(r=>r.json());
   const headers = { 'content-type':'application/json', origin:url, authorization:`Bearer ${login.token}`, 'x-moshpit-device':'review' };
