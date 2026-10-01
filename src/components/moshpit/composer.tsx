@@ -17,7 +17,7 @@ import { quickRepliesFor, type QuickReply } from "@/lib/moshpit/quick-replies";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
 import { useOnline } from "@/lib/moshpit/network";
-import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "@/lib/moshpit/image";
+import { validateImage } from "@/lib/moshpit/image";
 
 type Recognition = {
   lang: string; interimResults: boolean; continuous: boolean;
@@ -268,9 +268,9 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   }
 
   function pickImage(image?: File) {
-    if (!image || busy) return;
-    if (!IMAGE_TYPES.includes(image.type)) { toast("Choose a PNG, JPEG, WebP, or GIF image."); return; }
-    if (!image.size || image.size > MAX_IMAGE_BYTES) { toast("Choose an image smaller than 10 MB."); return; }
+    if (!image || draftStore(draftKey).getSnapshot().draft.submission?.state === "submitting") return;
+    const error = validateImage(image);
+    if (error) { toast(error); return; }
     saved.update({ attachment: image });
   }
   // Insertion never sends: it edits the draft through the same revision path

@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "@playwright/test";
-import { test, expect, openApp, seedHosts, loginBridge, pairBridge, type Bridge } from "../fixtures";
+import type { Locator, Page } from "@playwright/test";
+import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone, type Bridge } from "../fixtures";
 
 const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 
@@ -51,6 +51,25 @@ async function savedImage(host: Bridge, prompt: string, text: string) {
   expect((await stat(path.dirname(filename))).mode & 0o777).toBe(0o700);
 }
 
+async function dispatchImagePaste(target: Locator, { name, onBody = false }: { name: string; onBody?: boolean }) {
+  await target.evaluate(async (element, { name, data, onBody }) => {
+    const expectedBytes = Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0));
+    const files = new DataTransfer();
+    files.items.add(new File([expectedBytes], name, { type: "image/png" }));
+    const event = new ClipboardEvent("paste", { clipboardData: files, bubbles: true, cancelable: true });
+    // Firefox's synthetic ClipboardEvent constructor discards supplied files.
+    if (event.clipboardData?.files.length !== 1) Object.defineProperty(event, "clipboardData", { value: files });
+    const image = event.clipboardData?.files[0];
+    if (!image) throw new Error("The synthetic paste event has no image.");
+    const actualBytes = new Uint8Array(await image.arrayBuffer());
+    if (event.clipboardData?.files.length !== 1 || image.name !== name || image.type !== "image/png" ||
+        actualBytes.length !== expectedBytes.length || actualBytes.some((byte, index) => byte !== expectedBytes[index])) {
+      throw new Error("The synthetic paste event changed its image metadata or bytes.");
+    }
+    (onBody ? document.body : element).dispatchEvent(event);
+  }, { name, data: imageBytes.toString("base64"), onBody });
+}
+
 // The socket only shows the pane; keys go over HTTP through one queue, so
 // what reaches herdr is the text typed, in order, then Enter.
 test("typing in a live terminal reaches the pane in order over HTTP", async ({ page, bridge }) => {
@@ -98,17 +117,18 @@ test("terminal picker, paste and drop deliver private images followed by Enter",
   expect(writes[1]).toEqual(["pane", "send-keys", "w1:p1", "enter"]);
 
   for (const action of ["paste", "drop"]) {
-    await input.evaluate((element, { action, data }) => {
+    if (action === "paste") {
+      await input.focus();
+      await dispatchImagePaste(input, { name: "paste.png" });
+    } else await input.evaluate((element, data) => {
       const bytes = Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0));
       const files = new DataTransfer();
-      files.items.add(new File([bytes], `${action}.png`, { type: "image/png" }));
-      if (action === "paste") element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: files, bubbles: true, cancelable: true }));
-      else {
-        element.dispatchEvent(new DragEvent("dragover", { dataTransfer: files, bubbles: true, cancelable: true }));
-        element.dispatchEvent(new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true }));
-      }
-    }, { action, data: imageBytes.toString("base64") });
+      files.items.add(new File([bytes], "drop.png", { type: "image/png" }));
+      element.dispatchEvent(new DragEvent("dragover", { dataTransfer: files, bubbles: true, cancelable: true }));
+      element.dispatchEvent(new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true }));
+    }, imageBytes.toString("base64"));
     await expect(page.getByRole("img", { name: `Attachment preview: ${action}.png`, exact: true })).toBeVisible();
+    await expect(page.getByText("Drop an image here", { exact: true })).toHaveCount(0);
     if (action === "drop") {
       await page.getByRole("button", { name: "Remove image", exact: true }).click();
       await expect(page.getByRole("img", { name: "Attachment preview: drop.png", exact: true })).toHaveCount(0);
@@ -156,4 +176,84 @@ test("a rejected terminal image preserves the draft and image for retry", async 
   const writes = await capturedWrites(host);
   await savedImage(host, writes[0][3], "keep this draft ");
   expect(writes[1]).toEqual(["pane", "send-keys", "w1:p1", "enter"]);
+});
+
+async function pastePaneImage(page: Page, name: string, onBody = false) {
+  const pane = page.getByRole("application", { name: "Pane w1:p1", exact: true });
+  await pane.focus();
+  await dispatchImagePaste(pane, { name, onBody });
+}
+
+test("pane-focused image paste and drop attach to the composer without typing", async ({ page, bridge }) => {
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const input = page.getByRole("textbox", { name: "Terminal input" });
+  await input.fill("pane image ");
+  for (const onBody of [false, true]) {
+    const name = onBody ? "body.png" : "pane.png";
+    await pastePaneImage(page, name, onBody);
+    await expect(page.getByRole("img", { name: `Attachment preview: ${name}`, exact: true })).toBeVisible();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue("pane image ");
+    expect(await capturedWrites(host)).toEqual([]);
+  }
+  await page.getByRole("application", { name: "Pane w1:p1", exact: true }).evaluate((element, data) => {
+    const bytes = Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0));
+    const files = new DataTransfer();
+    files.items.add(new File([bytes], "pane-drop.png", { type: "image/png" }));
+    const accepted = !element.dispatchEvent(new DragEvent("dragover", { dataTransfer: files, bubbles: true, cancelable: true }));
+    if (!accepted) throw new Error("Terminal did not accept the file drag.");
+    element.dispatchEvent(new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true }));
+  }, imageBytes.toString("base64"));
+  await expect(page.getByRole("img", { name: "Attachment preview: pane-drop.png", exact: true })).toBeVisible();
+  await expect(input).toBeFocused();
+  expect(await capturedWrites(host)).toEqual([]);
+  await expect(page.getByText("Images go through the composer", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(async () => (await capturedWrites(host)).length).toBe(2);
+  const writes = await capturedWrites(host);
+  await savedImage(host, writes[0][3], "pane image ");
+  expect(writes[1]).toEqual(["pane", "send-keys", "w1:p1", "enter"]);
+});
+
+test("pane image paste cannot replace an attachment during delivery", async ({ page, bridge }) => {
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  await pastePaneImage(page, "sending.png");
+  await expect(page.getByRole("img", { name: "Attachment preview: sending.png", exact: true })).toBeVisible();
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`${host.url}/api/submit`, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  const sending = page.waitForRequest(`${host.url}/api/submit`);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await sending;
+  await pastePaneImage(page, "replacement.png");
+  await expect(page.getByRole("img", { name: "Attachment preview: sending.png", exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Attachment preview: replacement.png", exact: true })).toHaveCount(0);
+  expect(await capturedWrites(host)).toEqual([]);
+  release();
+  await expect.poll(async () => (await capturedWrites(host)).length).toBe(2);
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
+});
+
+test("pane image attachments stay with their agent session and Terminal draft", async ({ demo: page }, testInfo) => {
+  await page.getByRole("button", { name: /migrate/ }).first().click();
+  await page.getByRole("button", { name: "Terminal view", exact: true }).click();
+  const pane = page.getByRole("application", { name: "Pane w1:p2", exact: true });
+  await pane.focus();
+  await dispatchImagePaste(pane, { name: "migrate.png" });
+  await expect(page.getByRole("img", { name: "Attachment preview: migrate.png", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Chat view", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
+  if (isPhone(testInfo)) await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByRole("button", { name: /postcard-ui/ }).first().click();
+  await page.getByRole("button", { name: "Terminal view", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
+  if (isPhone(testInfo)) await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByRole("button", { name: /migrate/ }).first().click();
+  await page.getByRole("button", { name: "Terminal view", exact: true }).click();
+  await expect(page.getByRole("img", { name: "Attachment preview: migrate.png", exact: true })).toBeVisible();
 });

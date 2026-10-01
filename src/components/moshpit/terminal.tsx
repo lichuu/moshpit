@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { projectOf } from "@/lib/moshpit/label";
 import { useLayout } from "@/lib/moshpit/layout-context";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { draftStore } from "@/lib/moshpit/drafts";
+import { validateImage } from "@/lib/moshpit/image";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
 import type { TermSize } from "@/lib/moshpit/types";
@@ -254,12 +255,34 @@ export function Terminal() {
   const [quickSlot, setQuickSlot] = useState<HTMLDivElement | null>(null);
   const moreKeys = useMoreToRight(strip, layout.regime !== "wide");
   const surface = useRef<PaneHandle | null>(null);
+  const terminalRoot = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<PaneStatus>({ state: "connecting", attempt: 0, error: null });
   const [paneFocused, setPaneFocused] = useState(false);
   const host = useMoshpitStore(
     (s) => s.hosts.find((h) => h.id === s.connectedHostId) ?? null,
   );
   const hostUrl = host ? bridgeUrl(host) : "";
+  const terminalDraft = connected && composerAgent
+    ? draftStore([connected, composerAgent.sessionId ?? `unresolved:${targetId}`, "terminal"])
+    : undefined;
+  const attachImage = useCallback((image: File) => {
+    if (!terminalDraft || terminalDraft.getSnapshot().draft.submission?.state === "submitting") return;
+    const error = validateImage(image);
+    if (error) { toast(error); return; }
+    terminalDraft.update({ attachment: image });
+    requestAnimationFrame(() => terminalRoot.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Terminal input"]')?.focus());
+  }, [terminalDraft]);
+  useEffect(() => {
+    const pasteImage = (event: ClipboardEvent) => {
+      const image = event.clipboardData?.files[0];
+      if (!image || !terminalRoot.current?.contains(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      attachImage(image);
+    };
+    document.addEventListener("paste", pasteImage, true);
+    return () => document.removeEventListener("paste", pasteImage, true);
+  }, [attachImage]);
 
   // Demo host: the pane view is the seeded log, not a bridge stream.
   const demoSource = host?.tailnetUrl ? undefined : shell ? shell.lines : agent?.lines;
@@ -301,7 +324,8 @@ export function Terminal() {
   // The composer's own draft for this pane: the text lands there unsent,
   // after anything already typed, for review and an explicit submit.
   function transfer(text: string) {
-    const draft = draftStore([connected ?? "disconnected", composerAgent?.sessionId ?? `unresolved:${targetId}`, "terminal"]);
+    const draft = terminalDraft;
+    if (!draft) return;
     const current = draft.getSnapshot().draft.text;
     draft.update({ text: current ? `${current}\n${text}` : text });
     requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Terminal input"]')?.focus());
@@ -315,7 +339,16 @@ export function Terminal() {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div ref={terminalRoot} className="flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragOverCapture={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
+      onDropCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest(".composer-wrap")) return;
+        const image = event.dataTransfer.files[0];
+        if (!image) return;
+        event.preventDefault();
+        event.stopPropagation();
+        attachImage(image);
+      }}>
       <PaneSurface
         // One mount per host and pane: a switch starts from empty rows, and
         // nothing from the old socket can reach the new one. Layout changes
