@@ -1,0 +1,27 @@
+node_modules
+dist/
+.output/
+*.log
+.DS_Store
+.pi/
+
+# Bridge runtime state and secrets
+.moshpit-state/
+deploy/bridge.env
+
+# pstack working artifacts
+.audit/
+decisions.tsv
+.agents/skills/verify-moshpit/proof/
+.agents/skills/verify-moshpit/proof-*.png
+
+# Tool caches and test output
+.tanstack/
+test-results/
+playwright-report/
+/screenshots/
+/check-*.png
+
+# Container example secrets and local image pin
+deploy/container/tailscale.env
+deploy/container/.env

@@ -1,0 +1,97 @@
+name: test
+
+# Every job runs on GitHub-hosted runners, which are free for a public
+# repository. See docs/pwa.md, CI.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A newer push to the same ref makes the older run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast checks run beside the browser shards, not in front of them.
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Bridge unit tests
+        run: npm run test:bridge
+
+  # The release executable needs Node 25.5 or later for node --build-sea, and
+  # each architecture builds natively. The serial counts commits, so the build
+  # needs the full history.
+  release:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Bridge suite against the release executable
+        run: npm run test:release
+
+  # Playwright spreads the tests across four shards.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The browser binaries are keyed to the lockfile's Playwright version;
+      # the system libraries (--with-deps) still install every run.
+      - name: Cache browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      # Layout runs on Chromium at phone and desktop widths. The origin
+      # boundary and the host lifecycle also run on Firefox and WebKit.
+      - name: Browser suite
+        run: npx playwright test --shard=${{ matrix.shard }}/4
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 7

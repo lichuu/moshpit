@@ -1,0 +1,15 @@
+# The image build runs git describe, so .git and every tracked file stay in
+# the context: leaving out a tracked file would make the version "-dirty".
+# Only untracked build output, dependencies and local state are left out.
+node_modules
+dist
+.output
+.claude
+.moshpit-state
+deploy/bridge.env
+deploy/container/tailscale.env
+test-results
+playwright-report
+.audit
+.tanstack
+deploy/container/.env

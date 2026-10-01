@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+#
+# An example derived image: the moshpit image plus one agent CLI. Agent CLIs
+# are not in the base image; add the ones you use the same way. Build it
+# after the base image, then point both moshpit and herdr in compose.yaml at
+# this image:
+#
+#   docker build -f deploy/container/Dockerfile.agents \
+#     --build-arg MOSHPIT_IMAGE=ghcr.io/lichuu/moshpit:v1.0.0 -t moshpit-agents .
+#
+# Pin MOSHPIT_IMAGE by digest in production (image@sha256:...).
+
+# node:26-bookworm-slim, for its node and npm
+ARG NODE_IMAGE=node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2
+ARG MOSHPIT_IMAGE=moshpit
+FROM ${NODE_IMAGE} AS node
+
+FROM ${MOSHPIT_IMAGE}
+USER root
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+# HOME=/root keeps npm's cache out of /agent-home, which is moshpit's volume.
+RUN export HOME=/root \
+ && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && npm install --global --no-fund --no-audit @openai/codex@0.157.1 \
+ && npm cache clean --force
+USER moshpit

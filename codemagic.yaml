@@ -1,0 +1,29 @@
+workflows:
+  ios-poc:
+    name: iOS POC build
+    instance_type: mac_mini_m2
+    environment:
+      vars:
+        XCODE_PROJECT: "ios/App.xcodeproj"
+        XCODE_SCHEME: "App"
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Build web app (SPA bundle for the shell)
+        script: npm run build:spa
+      - name: Sync web app into native shell
+        script: npx cap sync ios
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build ipa for distribution
+        script: xcode-project build-ipa --project "$CM_BUILD_DIR/$XCODE_PROJECT" --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - lichuu@users.noreply.github.com
+        notify:
+          success: true
+          failure: true

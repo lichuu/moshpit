@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Moshpit">
+  <rect width="16" height="16" fill="#11111b"/>
+  <path
+    d="M3.5 4v5.2c0 1.5 1.2 2.7 2.7 2.7h3.6c1.5 0 2.7-1.2 2.7-2.7V4"
+    fill="none"
+    stroke="#a6e3a1"
+    stroke-width="1.75"
+    stroke-linecap="round"
+  />
+  <path
+    d="M8 2.15v4.1"
+    fill="none"
+    stroke="#a6e3a1"
+    stroke-width="1.75"
+    stroke-linecap="round"
+  />
+</svg>

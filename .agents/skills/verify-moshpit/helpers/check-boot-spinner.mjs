@@ -1,0 +1,20 @@
+import { chromium } from "playwright";
+const b = await chromium.launch();
+let failed = false;
+const log = (ok, msg) => { console.log(ok ? `ok   ${msg}` : `FAIL ${msg}`); if (!ok) failed = true; };
+const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
+const p = await ctx.newPage();
+await p.route("**/api/vapid", () => {}); // hold the bridge probe so boot status stays mounted
+await p.goto("http://127.0.0.1:8188/?demo=1");
+const status = p.getByRole("status");
+await status.waitFor({ state: "visible", timeout: 8000 });
+await status.getByText("Connecting to your herd…").waitFor({ state: "visible", timeout: 3000 });
+log(true, "boot message visible with spinner");
+const inner = await status.locator("div").first().boundingBox();
+log(Boolean(inner) && Math.abs((inner.x + inner.width / 2) - 640) < 8, `boot message horizontally centered (center ${Math.round(inner.x + inner.width / 2)}/640)`);
+const svg = await status.locator("svg").first().boundingBox();
+log(Boolean(svg) && Math.abs((svg.x + svg.width / 2) - 640) < inner.width, "spinner present beside message");
+await p.screenshot({ path: "check-boot-spinner-desktop.png" });
+await ctx.close();
+await b.close();
+process.exit(failed ? 1 : 0);

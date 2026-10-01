@@ -1,0 +1,121 @@
+name: release
+
+# Builds and tests moshpit-linux-x64 and moshpit-linux-arm64 for a pushed v*
+# tag, then publishes them with their manifests and SHA256SUMS to the GitHub
+# Release for that tag. Releases are not signed; see docs/pwa.md, Verify a
+# release.
+#
+# Each architecture builds natively on a GitHub-hosted runner.
+
+on:
+  push:
+    tags: ["v*"]
+
+# A re-pushed tag supersedes the older run. A cancelled publish converges on
+# the next run: the release is reused and every upload clobbers.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    steps:
+      # Full history: the release serial is the commit count of the tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+
+      - name: Check the build will name this tag
+        run: |
+          version="$(git describe --always --dirty)"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::git describe gives '$version', not '$GITHUB_REF_NAME'. Release tags must be annotated (git tag -a)."
+            exit 1
+          fi
+
+      - name: Build and test the executable
+        run: npm run test:release
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: dist/release/moshpit-linux-*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: out
+          merge-multiple: true
+
+      - name: Require both builds
+        working-directory: out
+        run: |
+          for arch in x64 arm64; do
+            if [ ! -f "moshpit-linux-$arch" ]; then
+              echo "::error::The $arch build produced no executable."
+              exit 1
+            fi
+          done
+
+      # The same check docs/pwa.md gives users.
+      - name: Check each executable against its manifest
+        working-directory: out
+        run: |
+          for arch in x64 arm64; do
+            sum="$(jq -er .sha256 "moshpit-linux-$arch.json")"
+            echo "$sum  moshpit-linux-$arch" | sha256sum -c -
+          done
+
+      - name: Checksums and notes
+        working-directory: out
+        run: |
+          sha256sum moshpit-linux-* > SHA256SUMS
+          {
+            echo "Check a download before running it:"
+            echo
+            echo "    sha256sum -c --ignore-missing SHA256SUMS"
+            echo
+            echo "This detects a damaged download. It does not protect against a"
+            echo "compromised GitHub account or repository. See docs/pwa.md, Verify a release."
+          } > ../notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
+          gh release upload "$GITHUB_REF_NAME" out/* --clobber

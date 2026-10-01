@@ -1,0 +1,90 @@
+# moshpit as three containers in one network namespace, with no published
+# ports. The Tailscale sidecar owns the namespace and serves
+# https://<name>.<tailnet>.ts.net through serve.json to the bridge on
+# 127.0.0.1:8801. herdr runs the agents; the bridge reaches it through the
+# socket on the herdr volume. See "Run in a container" in docs/pwa.md.
+#
+#   cp tailscale.env.example tailscale.env   # an untagged auth key, or none
+#   echo 'MOSHPIT_IMAGE=ghcr.io/lichuu/moshpit:<tag>@sha256:<digest>' > .env
+#   docker compose up -d
+#   docker compose exec moshpit moshpit setup --yes
+#
+# Updates: change MOSHPIT_IMAGE in .env to the new tag and digest, then
+# docker compose up -d. Rolling back to an older tag never restores an older
+# device database.
+
+name: moshpit
+
+x-moshpit-image: &moshpit-image ${MOSHPIT_IMAGE:?set MOSHPIT_IMAGE in .env to ghcr.io/lichuu/moshpit:<tag>@sha256:<digest>}
+
+services:
+  tailscale:
+    # tailscale/tailscale:v1.102.5
+    image: tailscale/tailscale:v1.102.5@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
+    hostname: moshpit
+    env_file:
+      - path: tailscale.env
+        required: false
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_SERVE_CONFIG: /serve/serve.json
+      TS_AUTH_ONCE: "true"
+      # Kernel networking gives the shared namespace a tailnet interface, so
+      # setup's HTTPS check can reach the node's own name through Serve.
+      TS_USERSPACE: "false"
+      TS_ACCEPT_DNS: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - tailscale-socket:/var/run/tailscale
+      - ./serve.json:/serve/serve.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  moshpit:
+    image: *moshpit-image
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+      - herdr
+    init: true
+    restart: unless-stopped
+    volumes:
+      - config:/config
+      - state:/state
+      - herdr:/herdr
+      - workspaces:/workspaces
+      - agent-home:/agent-home
+      # setup reads the owner, DNS name and Serve route through the sidecar's socket.
+      - tailscale-socket:/var/run/tailscale
+
+  herdr:
+    image: *moshpit-image
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    entrypoint: ["/usr/local/bin/herdr-server"]
+    command: []
+    environment:
+      # Agents started by herdr keep the usual XDG state directory in their home.
+      XDG_STATE_HOME: /agent-home/.local/state
+    init: true
+    restart: unless-stopped
+    volumes:
+      - herdr:/herdr
+      - workspaces:/workspaces
+      - agent-home:/agent-home
+
+volumes:
+  tailscale-state:
+  tailscale-socket:
+  config:
+  state:
+  herdr:
+  workspaces:
+  # Agent credentials. Secret: only this stack's moshpit and herdr services
+  # mount it (herdr runs the agents, the bridge reads their sessions).
+  agent-home:

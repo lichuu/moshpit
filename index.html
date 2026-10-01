@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" class="antialiased">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>moshpit</title>
+    <meta
+      name="description"
+      content="A little space for your whole herd. Follow your coding agents, answer what needs you, and keep working from any device."
+    />
+    <meta name="theme-color" content="#222420" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- iOS ignores SVG for the home screen, so it needs a raster icon. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="moshpit" />
+    <!--
+      No black-translucent status bar. iOS draws that web view from the top of
+      the screen but keeps the viewport sized to screen-minus-status-bar and
+      reports no top safe-area inset, so the whole app sits one status bar too
+      high: the first row of content hides behind the clock and an equal strip
+      of dead background is left above the home indicator. The default style
+      lays the web view out below the status bar, where the viewport and the
+      screen agree. The bar itself takes its color from theme-color, which
+      paintTheme keeps on the active palette.
+    -->
+  </head>
+  <body class="bg-bg text-fg">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

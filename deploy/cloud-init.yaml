@@ -1,0 +1,148 @@
+#cloud-config
+#
+# Provisions a moshpit host on Ubuntu 24.04 (x64 or arm64) to the state
+# "installed, awaiting first device". See "Provision with cloud-init" in
+# docs/pwa.md. Before you use it, edit the four values marked REPLACE:
+#
+# - MOSHPIT_VERSION: the release tag to install.
+# - /root/moshpit-github-token: a GitHub token that can read the repository's
+#   releases while it is private, or nothing at all once it is public.
+# - the SSH public key for the moshpit user.
+# - the Tailscale auth key in /root/tailscale-authkey. Create it WITHOUT
+#   tags: moshpit setup refuses a tagged node (exit 17).
+#
+# The tailnet must have MagicDNS and HTTPS certificates enabled.
+#
+# Afterwards, print the enrollment link from your own machine. -t gives
+# setup a terminal, which it needs before it prints a link:
+#   ssh -t moshpit@<host> ./moshpit setup
+
+users:
+  - default
+  - name: moshpit
+    shell: /bin/bash
+    lock_passwd: true
+    # REPLACE with your SSH public key, for the enrollment step over SSH.
+    ssh_authorized_keys:
+      - ssh-ed25519 REPLACE-ME you@example.com
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+
+write_files:
+  # REPLACE with a fine-grained token with read access to the repository's
+  # contents, or empty the file for a public repository.
+  - path: /root/moshpit-github-token
+    permissions: "0600"
+    content: |
+      REPLACE-ME
+
+  - path: /root/tailscale-authkey
+    permissions: "0600"
+    content: |
+      tskey-auth-REPLACE-ME
+
+  # herdr's headless server as a user service, so the bridge has a herdr to drive.
+  - path: /home/moshpit/.config/systemd/user/herdr.service
+    defer: true
+    owner: moshpit:moshpit
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=herdr server for moshpit
+
+      [Service]
+      ExecStart=/usr/local/bin/herdr server
+      Restart=on-failure
+
+      [Install]
+      WantedBy=default.target
+
+  - path: /root/install-moshpit.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      # Stops at the first failure. Nothing downloaded runs before its check.
+      # The check compares the executable with the manifest published beside
+      # it. It catches a damaged download, not a release replaced by someone
+      # who can publish to the repository.
+      set -euo pipefail
+
+      MOSHPIT_VERSION=REPLACE-ME
+      HERDR_VERSION=0.9.1
+      HERDR_SHA256_X64=2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7
+      HERDR_SHA256_ARM64=f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e
+
+      [[ "$MOSHPIT_VERSION" =~ ^v[0-9A-Za-z.+-]+$ ]] || { echo "set MOSHPIT_VERSION to a release tag" >&2; exit 1; }
+      ! grep -q REPLACE-ME /root/moshpit-github-token || { echo "put a GitHub token in /root/moshpit-github-token, or empty it for a public repository" >&2; exit 1; }
+      ! grep -q REPLACE-ME /root/tailscale-authkey || { echo "put a Tailscale auth key in /root/tailscale-authkey" >&2; exit 1; }
+      ! grep -qs REPLACE-ME /home/moshpit/.ssh/authorized_keys || { echo "set the moshpit user's SSH public key" >&2; exit 1; }
+
+      case "$(uname -m)" in
+        x86_64) arch=x64; herdr_asset=herdr-linux-x86_64; herdr_sum=$HERDR_SHA256_X64 ;;
+        aarch64) arch=arm64; herdr_asset=herdr-linux-aarch64; herdr_sum=$HERDR_SHA256_ARM64 ;;
+        *) echo "moshpit runs on x64 and arm64 only" >&2; exit 1 ;;
+      esac
+
+      work=$(mktemp -d)
+      # Also on failure, so the header file holding the token never outlives the run.
+      trap 'rm -rf "$work"' EXIT
+      cd "$work"
+      # The API serves a private repository's assets to a token. curl sends
+      # the Authorization header only to api.github.com, not to the storage
+      # host an asset download redirects to.
+      api="https://api.github.com/repos/lichuu/moshpit"
+      token=$(tr -d '[:space:]' < /root/moshpit-github-token)
+      # In a header file, so the token is not in curl's argv for ps to show.
+      auth=()
+      if [ -n "$token" ]; then
+        (umask 077; printf 'Authorization: Bearer %s\n' "$token" > auth.header)
+        auth=(-H @auth.header)
+      fi
+      curl -fsSL --retry 3 "${auth[@]}" -H "Accept: application/vnd.github+json" -o release.json "$api/releases/tags/$MOSHPIT_VERSION"
+      for file in "moshpit-linux-$arch.json" "moshpit-linux-$arch"; do
+        url=$(python3 -c 'import json, sys; print(next(a["url"] for a in json.load(open("release.json"))["assets"] if a["name"] == sys.argv[1]))' "$file")
+        curl -fsSL --retry 3 "${auth[@]}" -H "Accept: application/octet-stream" -o "$file" "$url"
+      done
+
+      # The executable must be the one its manifest describes.
+      python3 -c 'import json, sys; print(json.load(open(sys.argv[1] + ".json"))["sha256"] + "  " + sys.argv[1])' "moshpit-linux-$arch" > manifest.sha256
+      sha256sum -c manifest.sha256
+      rm -f auth.header
+      # Kept until now, so a rerun after a failed download still has it.
+      shred -u /root/moshpit-github-token
+      install -o moshpit -g moshpit -m 0755 "moshpit-linux-$arch" /home/moshpit/moshpit
+
+      curl -fsSL --retry 3 -o herdr "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/$herdr_asset"
+      echo "$herdr_sum  herdr" | sha256sum -c -
+      install -m 0755 herdr /usr/local/bin/herdr
+
+      # Tailscale from its signed apt repository, signed in with an untagged
+      # key. The operator setting lets moshpit, not only root, add its Serve route.
+      # Setup's tailscale-operator preflight row refuses (exit 23) without it.
+      . /etc/os-release
+      curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+      curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
+      apt-get update
+      apt-get install -y tailscale
+      tailscale up --auth-key "file:/root/tailscale-authkey" --hostname moshpit --operator moshpit
+      shred -u /root/tailscale-authkey
+
+      # Linger is the one privileged step: loginctl needs root, so it runs
+      # here rather than inside setup. It starts moshpit's user manager, which
+      # setup and the service need.
+      uid=$(id -u moshpit)
+      chown -R moshpit:moshpit /home/moshpit/.config
+      loginctl enable-linger moshpit
+      systemctl start "user@$uid.service"
+      as_moshpit() { sudo -iu moshpit env XDG_RUNTIME_DIR="/run/user/$uid" "$@"; }
+      as_moshpit systemctl --user daemon-reload
+      as_moshpit systemctl --user enable --now herdr.service
+
+      as_moshpit ./moshpit setup --yes --allow-linger --json | tee /var/log/moshpit-setup.json
+      grep -q '"state":"installed, awaiting first device"' /var/log/moshpit-setup.json
+
+runcmd:
+  - [bash, /root/install-moshpit.sh]
