@@ -116,7 +116,7 @@ test.describe("terminal surface", () => {
       observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     });
 
-    if (isPhone(testInfo)) await page.getByRole("button", { name: "Back" }).click();
+    if (isPhone(testInfo)) await page.getByRole("button", { name: "Back", exact: true }).click();
     await page.getByRole("button", { name: /beta/ }).first().click();
     if (isPhone(testInfo)) await page.getByRole("button", { name: "Terminal view", exact: true }).click();
     await expect(page.getByRole("application", { name: "Pane w1:p2" })).toBeVisible();

@@ -4,7 +4,7 @@ Terminal is one of the three views inside an agent detail. It shows an ANSI-rend
 
 ## Sub-features
 
-- The special-key bar contains `esc`, `tab`, `shift+tab`, `^C`, `^D`, `^L`, the herdr prefix, `up`, `down`, `left`, and `right`. Each key sends input to the focused pane and echoes it in the log. For example, `esc` adds `[esc]` and `^C` adds `^C` followed by `interrupted`. Hardware Shift+Tab sends the named `shift+tab` sequence. Home, End, PageUp, PageDown, Delete, and function keys toast that they are not sent.
+- The special-key bar contains `esc`, `⌫` (Backspace), `tab`, `shift+tab`, `^C`, `^D`, `^L`, the herdr prefix, `up`, `down`, `left`, and `right`. Each key sends input to the focused pane and echoes it in the log. For example, `esc` adds `[esc]` and `^C` adds `^C` followed by `interrupted`. Hardware Shift+Tab sends the named `shift+tab` sequence. Home, End, PageUp, PageDown, Delete, and function keys toast that they are not sent.
 - `Quick replies` is a key-bar button beside `Aa` in Terminal (Chat keeps its collapsible row). It opens a popover region named `Quick replies`; a tap sends that reply to the pane and closes the popover.
 - `Display options` (the `Aa` button at the end of the key bar) opens a popover with `Wrap long lines` and `Text size S/M/L`. Both persist. Escape or a tap outside closes it without sending anything to the pane. On a phone the key strip scrolls and fades at its right edge while more keys are past it.
 - The Settings `herdr prefix` input accepts `ctrl+<letter>` and defaults to `ctrl+b`. The `^A` through `^D` buttons set common values. The key bar, swipe action, hint, and toasts use the saved value. An invalid draft does not change the store. Run `helpers/check-prefix.mjs <port> [screenshot]` to verify these paths.
@@ -25,6 +25,7 @@ Preconditions: doctor healthy; onboarded; demo host connected with herdr running
 - Click the `migrate` agent. Click `Terminal view`. Step 02 shows the terminal key bar and phone `Back`.
 - Click `esc`. Step 03 shows `[esc]` in the pane log.
 - Click `shift+tab`. Step 04 shows `[shift+tab]` in the pane log. Run `helpers/check-shift-tab.mjs <port> [screenshot]` for the standalone check.
+- Run `helpers/check-terminal-backspace.mjs <port>` to verify that `⌫` sends Backspace to the pane without editing the separate composer draft.
 - Focus the pane and press a modifier combination the pane does not support, such as Ctrl+Enter. Expect the toast `Ctrl+Enter is not sent to the pane` and no new pane line, while a plain Enter still reaches the pane. Run `helpers/check-pane-modifiers.mjs <port> [screenshot]` for the standalone check.
 - Type `hello from verify` into `Terminal input`. Click `Send`. Step 05 shows the text in the pane log.
 - Optional: click `^C`; expect `interrupted` in the log and the agent's status pill `idle`.
