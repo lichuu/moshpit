@@ -5,7 +5,7 @@ import { inspectAnswerDialog } from "./prompt.mjs";
  * Process-local observation cache for blocked dialogs, for herdr to use.
  *
  * herdr polls panes and hands each dump to `inspectAnswerDialog`; the cache
- * mints one UUID per distinct Codex card so the UI can gate a "consumed"
+ * mints one UUID per distinct answer card so the UI can gate a "consumed"
  * answer button per step. A terminal dump keeps a *consumed* entry, so a
  * card still on screen while the agent works through the answer does not
  * re-mint its token and re-offer an answered question. An unconsumed one is
@@ -55,7 +55,7 @@ export function createAnswerObservations({ randomUUID = systemRandomUUID, now = 
       targets.delete(target);
       entry = null;
     }
-    return copyOf(entry);
+    return inspected.kind === "choose" ? copyOf(entry) : null;
   }
 
   function consume(target, token, optionKey) {

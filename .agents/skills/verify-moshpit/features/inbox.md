@@ -11,6 +11,7 @@ The Inbox tab lists agent events in two sections: `Needs you` (blocked unresolve
 - `Reply` opens the agent in the detail pane (Steer composer) without changing the originating tab. The composer shows the `Blocked reply controls` strip with `Enter` and `Esc`.
 - Pressing `Enter` in the strip submits the inserted answer. The agent leaves `blocked`, the event moves from `Needs you` to `Recent` as a button labelled `answered`, and the badge clears if no other unresolved events remain.
 - A numbered choose dialog (such as `postcard-ui`) renders tappable numbered option buttons on the row. Options lock while the answer is in flight; a failed bridge write re-enables only the matching attempt.
+- Recognized Claude `AskUserQuestion` forms retain every ordinary choice even when the terminal pointer is on a later option. Buttons show the description and send the printed digit through a guarded token without Enter. The final review offers **Submit answers** explicitly. Unread Claude forms and multi-select choices show labels without positional answer buttons. `tests/bridge/chat-answer.spec.ts` covers these paths with an isolated bridge and pane fixture.
 - A finishing working agent appends a turn row without bumping the badge. The first tool line after a working start appends a tool row, also without a badge bump.
 - `Reset demo` and `Start herdr` reset the event list to the seed (blocked agents produce blocked rows again).
 

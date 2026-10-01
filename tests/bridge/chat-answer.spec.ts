@@ -1,5 +1,5 @@
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone } from "../fixtures";
 
 const QUESTION = "How should the generated file be indented?";
@@ -12,6 +12,66 @@ const CARD_ONE = [
   "tab to add notes | enter to submit answer | ←/→ to navigate questions | esc to interrupt",
 ].join("\n");
 const CARD_TWO = CARD_ONE.replace("Question 1/2 (2 unanswered)", "Question 2/2 (1 unanswered)");
+const CLAUDE_CARD = [
+  "Earlier assistant output.",
+  "────────────────────────────────────────",
+  "← ☐ Indent  ☐ Width  ✔ Submit →",
+  "",
+  QUESTION,
+  "",
+  "  1. Tabs (Recommended)",
+  "     Indent code with tab characters.",
+  "❯ 2. Spaces",
+  "     Indent code with space characters.",
+  "  3. Type something.",
+  "────────────────────────────────────────",
+  "  4. Chat about this",
+  "",
+  "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+].join("\n");
+const CLAUDE_NEXT = CLAUDE_CARD.replace(QUESTION, "Which indentation width should we use?")
+  .replace("← ☐ Indent  ☐ Width", "← ☑ Indent  ☐ Width")
+  .replace("Tabs (Recommended)", "4 spaces").replace("Spaces", "8 spaces");
+const CLAUDE_REVIEW = [
+  "────────────────────────────────────────",
+  "← ☑ Indent  ☑ Width  ✔ Submit →",
+  "Review your answers",
+  "",
+  QUESTION,
+  "  → Tabs (Recommended)",
+  "Which indentation width should we use?",
+  "  → 4 spaces",
+  "",
+  "Ready to submit your answers?",
+  "❯ 1. Submit answers",
+  "  2. Cancel",
+].join("\n");
+const CLAUDE_SESSION = JSON.stringify({
+  type: "assistant",
+  uuid: "tool-1",
+  message: { content: [{
+    type: "tool_use", id: "question-1", name: "AskUserQuestion",
+    input: { questions: [
+      { header: "Indent", question: QUESTION, multiSelect: false, options: [
+        { label: "Tabs (Recommended)", description: "Indent code with tab characters." },
+        { label: "Spaces", description: "Indent code with space characters." },
+      ] },
+      { header: "Width", question: "Which indentation width should we use?", multiSelect: false, options: [
+        { label: "4 spaces", description: "Indent code with tab characters." },
+        { label: "8 spaces", description: "Indent code with space characters." },
+      ] },
+    ] },
+  }] },
+}) + "\n";
+const claudeHerdr = `
+case "$*" in
+  "api snapshot"*) if [ -f "$MOSHPIT_STATE_DIR/submitted" ]; then status=working; else status=blocked; fi; printf '{"result":{"snapshot":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"%s","cwd":"/repo/app","workspace_id":"w1","terminal_title":"claude","agent_session":{"kind":"id","value":"session"},"revision":1}]}}}' "$status" ;;
+  "pane list"*) echo '{"result":{"panes":[{"pane_id":"w1:p1","label":"answerer","cwd":"/repo/app","workspace_id":"w1"}]}}' ;;
+  "pane read w1:p1"*) if [ -f "$MOSHPIT_STATE_DIR/review" ]; then printf '%b' ${JSON.stringify(CLAUDE_REVIEW)}; elif [ -f "$MOSHPIT_STATE_DIR/answered" ]; then printf '%b' ${JSON.stringify(CLAUDE_NEXT)}; else printf '%b' ${JSON.stringify(CLAUDE_CARD)}; fi ;;
+  "pane send-text w1:p1"*) printf '%s\\n' "$4" >> "$MOSHPIT_STATE_DIR/answer-keys"; if [ -f "$MOSHPIT_STATE_DIR/hold" ]; then echo '{}'; exit 0; fi; if [ -f "$MOSHPIT_STATE_DIR/review" ]; then touch "$MOSHPIT_STATE_DIR/submitted"; elif [ -f "$MOSHPIT_STATE_DIR/answered" ]; then touch "$MOSHPIT_STATE_DIR/review"; else touch "$MOSHPIT_STATE_DIR/answered"; fi; echo '{}' ;;
+  "pane send-keys w1:p1"*) printf '%s\\n' "$4" >> "$MOSHPIT_STATE_DIR/answer-keys"; echo '{}' ;;
+  *) echo '{}' ;;
+esac`;
 const SESSION = [
   {
     type: "response_item",
@@ -73,6 +133,100 @@ async function openAnswerer(page: import("@playwright/test").Page, host: { url: 
   await connectAnswerer(page, host);
   await expect(page.getByRole("button", { name: `Answer ${QUESTION}: Tabs (Recommended)` })).toBeVisible({ timeout: 20_000 });
 }
+
+test.describe("Claude AskUserQuestion taps", () => {
+  test("an unchanged consumed card stays guarded after navigating to Inbox", async ({ page, bridge }, testInfo) => {
+    const host = await bridge({ herdr: claudeHerdr, home: { ".claude/projects/app/session.jsonl": CLAUDE_SESSION } });
+    await writeFile(path.join(host.dir, "state", "hold"), "");
+    await openAnswerer(page, host);
+    const first = page.getByRole("button", { name: `Answer ${QUESTION}: Tabs (Recommended)` });
+    if (isPhone(testInfo)) await first.tap();
+    else await first.click();
+    await expect(first).toBeDisabled();
+    await page.waitForResponse((response) => response.url().startsWith(`${host.url}/api/snapshot`));
+    await expect(first).toBeDisabled();
+    await page.getByRole("button", { name: /Inbox/ }).first().click();
+    const inboxFirst = page.getByRole("button", { name: "1. Tabs (Recommended)", exact: true });
+    await expect(inboxFirst).toBeVisible();
+    const refused = page.waitForResponse((response) => response.url() === `${host.url}/api/action`);
+    if (isPhone(testInfo)) await inboxFirst.tap();
+    else await inboxFirst.click();
+    const response = await refused;
+    expect(response.request().postDataJSON().kind).toBe("answer");
+    expect(response.ok()).toBe(false);
+    expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n");
+  });
+
+  test("Chat matches wrapped questions, labels, and descriptions", async ({ page, bridge }, testInfo) => {
+    const wrapped = CLAUDE_CARD.replace(QUESTION, "How should the generated\nfile be indented?")
+      .replace("  1. Tabs (Recommended)", "  1. Tabs\n     (Recommended)")
+      .replace("Indent code with tab characters.", "Indent code with tab\n     characters.");
+    const host = await bridge({
+      herdr: claudeHerdr.replace(JSON.stringify(CLAUDE_CARD), JSON.stringify(wrapped)),
+      home: { ".claude/projects/app/session.jsonl": CLAUDE_SESSION },
+    });
+    await openAnswerer(page, host);
+    const first = page.getByRole("button", { name: `Answer ${QUESTION}: Tabs (Recommended)` });
+    await expect(first).toBeEnabled();
+    if (isPhone(testInfo)) await first.tap();
+    else await first.click();
+    await expect(page.getByRole("button", { name: "Answer Which indentation width should we use?: 4 spaces" })).toBeEnabled({ timeout: 10_000 });
+    expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n");
+  });
+
+  test("Chat answers the active question and unlocks the next question", async ({ page, bridge }, testInfo) => {
+    const host = await bridge({ herdr: claudeHerdr, home: { ".claude/projects/app/session.jsonl": CLAUDE_SESSION } });
+    await openAnswerer(page, host);
+    const first = page.getByRole("button", { name: `Answer ${QUESTION}: Tabs (Recommended)` });
+    const next = page.getByRole("button", { name: "Answer Which indentation width should we use?: 4 spaces" });
+    await expect(first).toBeEnabled();
+    await expect(next).toBeDisabled();
+    if (isPhone(testInfo)) await first.tap();
+    else await first.click();
+    await expect(next).toBeEnabled({ timeout: 10_000 });
+    expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n");
+  });
+
+  test("Inbox retains options above the cursor and submits a tapped answer", async ({ page, bridge }, testInfo) => {
+    const host = await bridge({ herdr: claudeHerdr, home: { ".claude/projects/app/session.jsonl": CLAUDE_SESSION } });
+    await connectAnswerer(page, host);
+    await page.getByRole("button", { name: /Inbox/ }).first().click();
+    const first = page.getByRole("button", { name: "1. Tabs (Recommended)", exact: true });
+    await expect(first).toBeVisible();
+    await expect(first).toBeEnabled();
+    if (isPhone(testInfo)) await first.tap();
+    else await first.click();
+    const inboxRow = page.locator("article").filter({ has: page.getByRole("button", { name: "Reply", exact: true }) });
+    await expect(inboxRow.getByText("Which indentation width should we use?", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => readFile(path.join(host.dir, "state", "answer-keys"), "utf8").catch(() => "")).toBe("1\n");
+    expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n");
+  });
+
+  for (const surface of ["Chat", "Inbox"]) {
+    test(`${surface} waits for an explicit review submission`, async ({ page, bridge }, testInfo) => {
+      const host = await bridge({ herdr: claudeHerdr, home: { ".claude/projects/app/session.jsonl": CLAUDE_SESSION } });
+      await openAnswerer(page, host);
+      if (surface === "Inbox") await page.getByRole("button", { name: /Inbox/ }).first().click();
+      const first = page.getByRole("button", { name: surface === "Chat" ? `Answer ${QUESTION}: Tabs (Recommended)` : "1. Tabs (Recommended)", exact: true });
+      await expect(first).toBeEnabled();
+      await page.screenshot({ path: `/tmp/moshpit-question-${testInfo.project.name}-${surface.toLowerCase()}-choices.png` });
+      if (isPhone(testInfo)) await first.tap();
+      else await first.click();
+      const next = page.getByRole("button", { name: surface === "Chat" ? "Answer Which indentation width should we use?: 4 spaces" : "1. 4 spaces", exact: true });
+      await expect(next).toBeEnabled({ timeout: 10_000 });
+      if (isPhone(testInfo)) await next.tap();
+      else await next.click();
+      const submit = page.getByRole("button", { name: surface === "Chat" ? "1 Submit answers" : "1. Submit answers", exact: true });
+      await expect(submit).toBeEnabled({ timeout: 10_000 });
+      await page.screenshot({ path: `/tmp/moshpit-question-${testInfo.project.name}-${surface.toLowerCase()}-review.png` });
+      expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n1\n");
+      if (isPhone(testInfo)) await submit.tap();
+      else await submit.click();
+      await expect(submit).toBeHidden({ timeout: 10_000 });
+      expect(await readFile(path.join(host.dir, "state", "answer-keys"), "utf8")).toBe("1\n1\n1\n");
+    });
+  }
+});
 
 test.describe("live answer locks", () => {
   test("conversation locks every sibling until the delayed response advances the token", async ({ page, bridge }) => {

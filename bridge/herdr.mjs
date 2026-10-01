@@ -483,7 +483,7 @@ function createDemoHerdr(onLine) {
       const choice = dialog.options.find((option) => option.key === optionKey);
       if (!choice) throw new Error(GONE);
       const questions = current.question;
-      const step = dialog.step.index;
+      const step = dialog.step?.index ?? -1;
       if (!questions?.[step]) throw new Error(GONE);
       const answered = questions.map((question, index) =>
         index === step ? { ...question, answer: choice.label } : question,
@@ -859,7 +859,7 @@ function createExecHerdr(bin) {
           .map(async (a) => {
             try {
               const text = await readDetection(a.id);
-              const found = extractPrompt(text);
+              let found = extractPrompt(text);
               const observed = observations.observe({
                 target: a.id,
                 sessionId: a.sessionId,
@@ -867,7 +867,12 @@ function createExecHerdr(bin) {
                 revision: a.revision,
                 dump: text,
               });
-              if (observed?.kind === "choose" && !observed.consumed) {
+              if (observed?.kind === "choose") {
+                found = { question: observed.question, options: observed.options };
+              } else if ((a.kind === "claude" || a.kind === "claude-code") && /enter to select|review your answers|type something\.|chat about this/iu.test(text) && found) {
+                found = { ...found, options: found.options.map((option) => ({ ...option, key: "" })) };
+              }
+              if (observed?.kind === "choose") {
                 a.blockedDialog = {
                   kind: "choose",
                   family: observed.family,

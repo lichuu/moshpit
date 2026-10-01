@@ -128,7 +128,7 @@ export function createSubmissions({ stateDir, herdr, prepareAttachment, canonica
         await validateSession();
         let text = request.text;
         if (request.attachment) {
-          if (!prepareAttachment || request.mode === "terminal" || request.mode === "stop") {
+          if (!prepareAttachment || request.mode === "stop") {
             throw new RequestError(400, "Attachments are unavailable for this action.");
           }
           text = await prepareAttachment(request.attachment, request);

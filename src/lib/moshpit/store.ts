@@ -1640,7 +1640,7 @@ export const useMoshpitStore = create<MoshpitState>()(
           ? dialog.options.find((option) => option.key === optionKey)
           : undefined;
         const questions = current?.question;
-        const step = dialog?.kind === "choose" ? dialog.step.index : -1;
+        const step = dialog?.kind === "choose" ? dialog.step?.index ?? -1 : -1;
         if (
           !dialog ||
           dialog.kind !== "choose" ||

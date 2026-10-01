@@ -34,8 +34,10 @@ Inline composer suggestions backed by the agent's real skill catalog.
   other `/api/*` route). The client sends the agent kind only; the bridge
   resolves it to a fixed skill directory (claude `~/.claude/skills`,
   claude-code `~/.claude/skills`, pi `~/.pi/agent/skills`, codex
-  `~/.codex/skills`, grok `~/.grok/skills`, opencode `~/.opencode/skills`)
-  and returns `{ kind, prefix, commands, coverage }` where each command
+  `~/.codex/skills`, grok `~/.grok/skills`). OpenCode reads commands and
+  skills from its XDG config directory, plus `~/.claude/skills` and
+  `~/.agents/skills`. The bridge returns
+  `{ kind, prefix, commands, coverage }` where each command
   carries its full invocation: claude `/<name>`, codex `$<name>`,
   pi `/skill:<name>` (pi's real skill command syntax; the skill name comes
   from the SKILL.md frontmatter, falling back to the directory name, and a
@@ -46,8 +48,9 @@ Inline composer suggestions backed by the agent's real skill catalog.
 - Typing the agent's own prefix at a token boundary opens the list above
   the composer; a partial name filters it. Arrow keys move the selection.
   Tab or Enter inserts without sending. Escape dismisses. A later Enter
-  submits. A token in another agent's syntax (a `/` or `$` token on a
-  `/skill:` catalog, and vice versa) never triggers. A slash inside a URL
+  submits. Only advertised prefixes trigger suggestions. Pi accepts `/`
+  for built-ins, templates, and extension commands, plus `/skill:` for
+  skills. A slash inside a URL
   or path never triggers. IME composition suppresses matching. Dismissal
   stays dismissed until the token changes.
 - Tapping a result replaces the whole active token (including text typed

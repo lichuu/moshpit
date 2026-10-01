@@ -115,9 +115,89 @@ const CODEX_HEADER = /^Question (\d+)\/(\d+) \(\d+ unanswered\)$/u;
 const CODEX_OPTION = /^\s*›?\s*(\d+)\.\s+(\S.*?)\s{2,}(\S.*)$/u;
 const CODEX_FOOTER = /^tab to add notes\s+enter to submit (?:answer|all)\s+←\/→ to navigate questions\s+esc to interrupt$/u;
 const KIND_TERMINAL = "terminal";
+const CLAUDE_FOOTER = /^enter to select\s*(?:·\s*)?(?:tab\/arrow keys to navigate|arrow keys to navigate|arrows to navigate|↑\/↓ to navigate|↑↓ to navigate)\s*(?:·\s*)?esc to cancel$/iu;
+const compact = (text) => text.replace(/\s+/gu, " ").trim();
+const claudeSignature = (lines) => createHash("sha256").update(lines.map((line) => compact(line.replace(/^\s*❯\s*/u, ""))).join("\n")).digest("hex");
+
+function inspectClaudeReview(lines) {
+  const title = lines.findLastIndex((line) => line.trim() === "Review your answers");
+  if (title < 0) return null;
+  const card = lines.slice(title).map((line) => line.trim()).filter(Boolean);
+  const ready = card.indexOf("Ready to submit your answers?");
+  if (ready < 1 || card.includes("You have not answered all questions")) return null;
+  const rows = card.slice(ready + 1);
+  if (rows.length !== 2 || !/^❯?\s*1\. Submit answers$/u.test(rows[0]) || !/^❯?\s*2\. Cancel$/u.test(rows[1])) return null;
+  if (rows.filter((line) => line.startsWith("❯")).length !== 1) return null;
+  const tabs = lines.slice(0, title).findLast((line) => /[☐☑]/u.test(line));
+  if (!tabs || tabs.includes("☐") || !tabs.includes("Submit")) return null;
+  return {
+    kind: "choose",
+    family: "claude-ask-user-review-v1",
+    question: "Ready to submit your answers?",
+    step: null,
+    options: [{ key: "1", label: "Submit answers" }],
+    signature: claudeSignature(lines),
+  };
+}
+
+function inspectClaude(lines) {
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  if (!CLAUDE_FOOTER.test(lines[end - 1]?.trim() ?? "")) return null;
+  const first = lines.findLastIndex((line) => NUMBERED.exec(line)?.[1] === "1");
+  if (first < 1) return null;
+  const options = [];
+  let pointerRows = 0;
+  let other = false;
+  let chat = false;
+  for (let i = first; i < end - 1; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const row = NUMBERED.exec(line);
+    if (row) {
+      if (Number(row[1]) !== options.length + (other ? 2 : 1)) return null;
+      if (row[2] === "Type something.") {
+        if (other || options.length < 2 || options.length > 4 || line.includes("❯")) return null;
+        other = true;
+      } else if (row[2] === "Chat about this") {
+        if (!other || chat || line.includes("❯")) return null;
+        chat = true;
+      } else {
+        if (other || /[☐☑▢✓]/u.test(row[2])) return null;
+        if (line.includes("❯")) pointerRows++;
+        options.push({ key: row[1], label: row[2], description: "" });
+      }
+      continue;
+    }
+    if (other || !options.length || /[❯☐☑▢✓]/u.test(line) || !/^\s+\S/u.test(line)) return null;
+    options.at(-1).description = compact(`${options.at(-1).description} ${line}`);
+  }
+  if (!other || !chat || pointerRows !== 1) return null;
+  let start = first;
+  while (start > 0 && !lines[start - 1].trim()) start--;
+  let questionStart = start;
+  while (questionStart > 0 && lines[questionStart - 1].trim()) questionStart--;
+  const question = compact(lines.slice(questionStart, start).join(" "));
+  if (!question || /[☐☑]/u.test(question)) return null;
+  return {
+    kind: "choose",
+    family: "claude-ask-user-question-v1",
+    question,
+    step: null,
+    options,
+    signature: claudeSignature(lines.slice(0, end)),
+  };
+}
 
 export function inspectAnswerDialog(kind, dump) {
   const raw = String(dump ?? "");
+  if ((kind === "claude" || kind === "claude-code") && Buffer.byteLength(raw, "utf8") <= 32 * 1024) {
+    const lines = normalize(raw);
+    if (lines.length <= 128) {
+      const inspected = inspectClaudeReview(lines) ?? inspectClaude(lines);
+      if (inspected) return inspected;
+    }
+  }
   if (kind === "codex" && Buffer.byteLength(raw, "utf8") <= 32 * 1024) {
     const lines = normalize(raw);
     if (lines.length <= 128) {

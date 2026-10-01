@@ -106,8 +106,10 @@ function EventRow({
           {tappable.length ? (
             tappable.map((opt) => {
               const answerBusy = answerCardLocked && answerLock?.key === opt.key;
+              const description = choose?.options.find((option) => option.key === opt.key)?.description;
               return <Button
                 key={opt.key}
+                aria-label={`${opt.key}. ${opt.label}`}
                 size="sm"
                 variant={/^\s*no\b/i.test(opt.label) ? "danger" : "default"}
                 disabled={answerCardLocked}
@@ -136,7 +138,12 @@ function EventRow({
                   sendKeys(event.agentId, { text: opt.key }, release);
                 }}
               >
-                {opt.key}. {opt.label}
+                <span>
+                  {opt.key}. {opt.label}
+                  {description ? (
+                    <span className="mt-0.5 block text-xs text-subtle">{description}</span>
+                  ) : null}
+                </span>
               </Button>;
             })
           ) : options?.length ? (

@@ -149,3 +149,73 @@ for (const [name, kind, dump] of NEGATIVES) {
     assert.equal(r.kind, KIND_TERMINAL);
   });
 }
+
+const CLAUDE_CARD = [
+  "Earlier output.",
+  "────────────────────────────",
+  "← ☐ Indent  ☐ Width  ✔ Submit →",
+  "",
+  "How should the generated",
+  "file be indented?",
+  "",
+  "  1. Tabs (Recommended)",
+  "     Indent code with tab",
+  "     characters.",
+  "❯ 2. Spaces",
+  "     Indent code with space characters.",
+  "  3. Type something.",
+  "────────────────────────────",
+  "  4. Chat about this",
+  "",
+  "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+].join("\n");
+const CLAUDE_REVIEW = [
+  "← ☑ Indent  ☑ Width  ✔ Submit →",
+  "Review your answers",
+  "How should the generated file be indented?",
+  "  → Tabs (Recommended)",
+  "Ready to submit your answers?",
+  "❯ 1. Submit answers",
+  "  2. Cancel",
+].join("\n");
+
+test("Claude single-select keeps all choices when the pointer moved and normalizes wraps", () => {
+  const dialog = inspectAnswerDialog("claude", CLAUDE_CARD);
+  assert.equal(dialog.kind, "choose");
+  assert.equal(dialog.family, "claude-ask-user-question-v1");
+  assert.equal(dialog.question, "How should the generated file be indented?");
+  assert.equal(dialog.step, null);
+  assert.deepEqual(dialog.options, [
+    { key: "1", label: "Tabs (Recommended)", description: "Indent code with tab characters." },
+    { key: "2", label: "Spaces", description: "Indent code with space characters." },
+  ]);
+  assert.equal(inspectAnswerDialog("claude", CLAUDE_CARD.replace("  1.", "❯ 1.").replace("❯ 2.", "  2.")).signature, dialog.signature);
+  assert.notEqual(inspectAnswerDialog("claude", CLAUDE_CARD.replace("☐ Indent", "☑ Indent")).signature, dialog.signature);
+});
+
+test("Claude one-question form does not need the multi-question Submit tab", () => {
+  const dialog = inspectAnswerDialog("claude", CLAUDE_CARD.replace("← ☐ Indent  ☐ Width  ✔ Submit →", "☐ Indent").replace("Tab/Arrow keys to navigate", "↑/↓ to navigate"));
+  assert.equal(dialog.kind, "choose");
+  assert.equal(dialog.options[0].key, "1");
+});
+
+test("Claude review offers explicit Submit answers after every tab is answered", () => {
+  const dialog = inspectAnswerDialog("claude", CLAUDE_REVIEW);
+  assert.equal(dialog.family, "claude-ask-user-review-v1");
+  assert.deepEqual(dialog.options, [{ key: "1", label: "Submit answers" }]);
+  assert.equal(inspectAnswerDialog("claude", CLAUDE_REVIEW.replace("☑ Width", "☐ Width")).kind, "terminal");
+  assert.equal(inspectAnswerDialog("claude", CLAUDE_REVIEW + "\nUnknown footer").kind, "terminal");
+});
+
+for (const [name, dump] of [
+  ["multi-select", CLAUDE_CARD.replace("Tabs (Recommended)", "☐ Tabs (Recommended)")],
+  ["duplicate keys", CLAUDE_CARD.replace("❯ 2.", "❯ 1.")],
+  ["missing footer", CLAUDE_CARD.split("\n").slice(0, -1).join("\n")],
+  ["focused Other", CLAUDE_CARD.replace("❯ 2.", "  2.").replace("  3.", "❯ 3.")],
+  ["extra trailing output", CLAUDE_CARD + "\nWorking now"],
+  ["incomplete review", CLAUDE_REVIEW.replace("Ready to", "You have not answered all questions\nReady to")],
+]) {
+  test(`Claude unread ${name} stays in Terminal`, () => {
+    assert.equal(inspectAnswerDialog("claude", dump).kind, "terminal");
+  });
+}

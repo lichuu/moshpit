@@ -162,8 +162,10 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
   // the agent's own printed keys, so its matching question stays tappable
   // even in a multi-question card; the printed key is shown on the row.
   const choose = dialog?.kind === "choose" ? dialog : undefined;
+  const compact = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const matches = (question: Question) => choose && compact(choose.question) === compact(question.text);
   const live = (question: Question) =>
-    choose && !entry.resolved && !question.multi && choose.question === question.text ? choose : undefined;
+    choose && !entry.resolved && !question.multi && matches(question) && entry.questions.filter(matches).length === 1 ? choose : undefined;
   const single = entry.questions.length === 1 && !entry.questions[0].multi;
   const dialogToken = choose?.expected.token ?? null;
   const cardLocked = Boolean(
@@ -182,8 +184,13 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
   // tool call's option list and the card's need not line up, so taking the
   // key at the same position would send one the row does not show. No match,
   // no tap — the Terminal button below takes the card instead.
-  const printedKey = (question: Question, label: string) =>
-    live(question)?.options.find((option) => option.label === label)?.key;
+  const printedKey = (question: Question, label: string) => {
+    const option = question.options.find((item) => item.label === label);
+    const candidates = live(question)?.options.filter((item) =>
+      (item.label === label && (!item.description || !option?.description)) || (option && compact(`${item.label} ${item.description ?? ""}`) === compact(`${option.label} ${option.description ?? ""}`)),
+    );
+    return candidates?.length === 1 ? candidates[0].key : undefined;
+  };
   const tappable = (question: Question, label: string) =>
     canAnswer && !cardLocked && (choose ? printedKey(question, label) !== undefined : single);
   // A card routes to Terminal when no exact live question can supply its own
@@ -193,7 +200,7 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
     : undefined;
   const needsTerminal =
     !entry.resolved &&
-    !cardLocked &&
+    !cardLocked && choose?.family !== "claude-ask-user-review-v1" &&
     (choose
       ? !liveQuestion ||
         liveQuestion.multi ||
