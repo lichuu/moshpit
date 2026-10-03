@@ -192,10 +192,15 @@ function createScanState({ signal, deadlineMs = DEFAULT_DEADLINE_MS, now = Date.
 // The wait settles on the abort or the deadline even while the filesystem
 // call is still pending: Node cannot cancel a pending fs request, so the
 // caller owns whatever the late result produces (a descriptor to close).
+// A stop that lands before the race arms still observes the started
+// operation first: its late rejection must not surface as unhandled.
 function raceSettled(pending, state) {
-  if (state.signal?.aborted) return Promise.reject(new ScanStoppedError("aborted"));
-  const remaining = state.deadlineMs - (state.now() - state.started);
-  if (remaining <= 0) return Promise.reject(new ScanStoppedError("deadline"));
+  const elapsed = state.now() - state.started;
+  if (state.signal?.aborted || elapsed >= state.deadlineMs) {
+    pending.catch(() => {});
+    return Promise.reject(new ScanStoppedError(state.signal?.aborted ? "aborted" : "deadline"));
+  }
+  const remaining = state.deadlineMs - elapsed;
   return new Promise((resolve, reject) => {
     let timer;
     const onAbort = () => {
@@ -225,6 +230,18 @@ function raceSettled(pending, state) {
   });
 }
 
+// A close outlives the stop when it waits behind pending filesystem work:
+// the caller must not wait on it, but the late result stays observed so it
+// cannot surface as an unhandled rejection.
+async function closeSettled(close, state) {
+  const pending = close.catch(() => {});
+  try {
+    await raceSettled(pending, state);
+  } catch {
+    // The stop won the race; the close settles on its own, observed.
+  }
+}
+
 const MISSING_CODES = new Set(["ENOENT", "ENOTDIR"]);
 
 function noteFsError(state, error) {
@@ -247,12 +264,12 @@ async function openRegular(file, state) {
   try {
     const stats = await raceSettled(fd.stat(), state);
     if (!stats.isFile()) {
-      await fd.close().catch(() => {});
+      await closeSettled(fd.close(), state);
       return { stats, regular: false };
     }
     return { fd, stats, regular: true };
   } catch (error) {
-    await fd.close().catch(() => {});
+    await closeSettled(fd.close(), state);
     throw error;
   }
 }
@@ -307,7 +324,7 @@ async function readBounded(file, at, scan, state) {
     }
     return { raw: buf.toString("utf8"), stats };
   } finally {
-    await fd.close().catch(() => {});
+    await closeSettled(fd.close(), state);
   }
 }
 
@@ -386,18 +403,33 @@ async function walk(dir, relative, depth, wanted, scan, state, visited) {
   try {
     real = await raceSettled(realpath(dir), state);
   } catch (error) {
-    await handle.close().catch(() => {});
+    await closeSettled(handle.close(), state);
     noteFsError(state, error);
     return;
   }
   if (visited.has(real)) {
-    await handle.close().catch(() => {});
+    await closeSettled(handle.close(), state);
     return;
   }
   visited.add(real);
+  // The explicit next() keeps the directory read on the shared stop: a
+  // for-await loop would await the read and the iterator cleanup without
+  // racing either.
+  const entries = handle[Symbol.asyncIterator]();
   try {
-    for await (const entry of handle) {
+    for (;;) {
       state.stopped();
+      let step;
+      try {
+        step = await raceSettled(entries.next(), state);
+      } catch (error) {
+        // A stop propagates; an unreadable directory notes its source and
+        // the walk stops there, leaving siblings and other sources intact.
+        noteFsError(state, error);
+        return;
+      }
+      if (step.done) break;
+      const entry = step.value;
       if (state.full()) return;
       if (!state.examine()) return;
       const next = relative ? `${relative}/${entry.name}` : entry.name;
@@ -408,7 +440,7 @@ async function walk(dir, relative, depth, wanted, scan, state, visited) {
       if (!entry.isDirectory() && wanted(entry.name)) await readCandidate(path.join(dir, entry.name), next, scan, state);
     }
   } finally {
-    await handle.close().catch(() => {});
+    await closeSettled(handle.close(), state);
   }
 }
 
@@ -422,9 +454,21 @@ async function scanLevel(root, keep, sub, scan, state) {
     noteFsError(state, error);
     return;
   }
+  const entries = handle[Symbol.asyncIterator]();
   try {
-    for await (const entry of handle) {
+    for (;;) {
       state.stopped();
+      let step;
+      try {
+        step = await raceSettled(entries.next(), state);
+      } catch (error) {
+        // A stop propagates; an unreadable source notes itself and the level
+        // ends, leaving the remaining sources intact.
+        noteFsError(state, error);
+        return;
+      }
+      if (step.done) break;
+      const entry = step.value;
       if (state.full()) return;
       if (!state.examine()) return;
       if (!keep(entry)) continue;
@@ -433,7 +477,7 @@ async function scanLevel(root, keep, sub, scan, state) {
       await readCandidate(file, at, scan, state);
     }
   } finally {
-    await handle.close().catch(() => {});
+    await closeSettled(handle.close(), state);
   }
 }
 

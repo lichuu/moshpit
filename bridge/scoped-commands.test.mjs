@@ -4,7 +4,7 @@ import { after, test } from "node:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CommandScopeError, ScanStoppedError, projectToken, scopedCatalog } from "./commands.mjs";
+import { CommandScopeError, ScanStoppedError, projectToken, scanAgentCommands, scopedCatalog } from "./commands.mjs";
 import { createHerdr, run } from "./herdr.mjs";
 import { createProjectResolver } from "./projects.mjs";
 
@@ -464,4 +464,127 @@ test("an aborted scoped lookup keeps the cached root and never shares its promis
   assert.equal(after, first, "the aborted scoped lookup left the cached root in place");
   assert.equal(calls.length, 2, "the ordinary lookup ran its own worktree read");
   release();
+});
+
+// --- whole-read ownership: directory reads, iterator cleanup and closes
+// stay on the shared stop; late results are observed, never unhandled.
+
+test("a stalled directory read stops the scan at the deadline", { timeout: 10000 }, async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-s8-dirwait-"));
+  const target = path.join(home, ".claude", "skills");
+  await mkdir(target, { recursive: true });
+  const { Dir } = await import("node:fs");
+  const nativeRead = Dir.prototype.read;
+  const nativeIterator = Dir.prototype[Symbol.asyncIterator];
+  const unhandled = [];
+  const onUnhandled = (error) => unhandled.push(error?.code ?? String(error));
+  process.on("unhandledRejection", onUnhandled);
+  let entered = 0;
+  Dir.prototype.read = function (callback) {
+    if (this.path !== target) return nativeRead.apply(this, arguments);
+    if (typeof callback === "function") return;
+    return new Promise(() => {});
+  };
+  Dir.prototype[Symbol.asyncIterator] = function () {
+    if (this.path !== target) return nativeIterator.call(this);
+    entered += 1;
+    return { next: () => new Promise(() => {}) };
+  };
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      scanAgentCommands({ kind: "claude", home, signal: AbortSignal.timeout(100), deadlineMs: 100 }),
+      (error) => error instanceof ScanStoppedError,
+    );
+    assert.ok(Date.now() - started < 900, "the shared stop won, not an outer timeout");
+    assert.ok(entered > 0, "the probe reached the real directory read");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(unhandled, [], "the pending read stayed observed");
+  } finally {
+    Dir.prototype.read = nativeRead;
+    Dir.prototype[Symbol.asyncIterator] = nativeIterator;
+    process.removeListener("unhandledRejection", onUnhandled);
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a stalled close after a timed-out stat does not hold the caller", { timeout: 10000 }, async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-s8-closewait-"));
+  const file = path.join(home, ".claude", "skills", "probe", "SKILL.md");
+  await writeTree(file, "---\ndescription: Probe.\n---\n");
+  // The default export is the mutable CJS module; syncBuiltinESMExports makes
+  // the patch visible to the ESM binding commands.mjs imports.
+  const fs = (await import("node:fs/promises")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const nativeOpen = fs.open;
+  const unhandled = [];
+  const onUnhandled = (error) => unhandled.push(error?.code ?? String(error));
+  process.on("unhandledRejection", onUnhandled);
+  let closes = 0;
+  const realCloses = [];
+  fs.open = async (...args) => {
+    const fd = await nativeOpen(...args);
+    if (args[0] === file) {
+      realCloses.push(fd.close.bind(fd));
+      fd.stat = () => new Promise(() => {});
+      fd.close = () => {
+        closes += 1;
+        return new Promise(() => {});
+      };
+    }
+    return fd;
+  };
+  syncBuiltinESMExports();
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      scanAgentCommands({ kind: "claude", home, signal: AbortSignal.timeout(100), deadlineMs: 100 }),
+      (error) => error instanceof ScanStoppedError,
+    );
+    assert.ok(Date.now() - started < 900, "cleanup did not hold the bounded caller");
+    assert.ok(closes > 0, "the descriptor close was attempted");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(unhandled, [], "the stalled close stayed observed");
+  } finally {
+    fs.open = nativeOpen;
+    syncBuiltinESMExports();
+    process.removeListener("unhandledRejection", onUnhandled);
+    for (const close of realCloses) await close().catch(() => {});
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("an expired wait observes its already-started operation", { timeout: 10000 }, async () => {
+  const fs = (await import("node:fs/promises")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const native = fs.realpath;
+  const unhandled = [];
+  const onUnhandled = (error) => unhandled.push(error?.code ?? String(error));
+  process.on("unhandledRejection", onUnhandled);
+  let launched = false;
+  fs.realpath = () => {
+    launched = true;
+    return new Promise((resolve, reject) =>
+      setTimeout(() => reject(Object.assign(new Error("injected late filesystem failure"), { code: "EIO" })), 50),
+    );
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      scanAgentCommands({
+        kind: "claude",
+        home: "/tmp/owned-race-fixture",
+        deadlineMs: 100,
+        now: () => (launched ? 101 : 0),
+      }),
+      (error) => error instanceof ScanStoppedError && error.reason === "deadline",
+    );
+    assert.ok(launched, "the operation started before the deadline expired");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(unhandled, [], "the late rejection was observed");
+  } finally {
+    fs.realpath = native;
+    syncBuiltinESMExports();
+    process.removeListener("unhandledRejection", onUnhandled);
+  }
 });

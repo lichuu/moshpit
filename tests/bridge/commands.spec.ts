@@ -268,6 +268,58 @@ esac`,
     expect(own.status).toBe(200);
     expect((own.body?.scope as { project?: string })?.project).toBe(JSON.stringify([null, "/repo/b"]));
   });
+
+  test("a hung directory read ends the live route at the shared deadline", async ({
+    page,
+    bridge,
+  }) => {
+    const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const work = await mkdtemp(path.join(tmpdir(), "moshpit-s8-hung-"));
+    const preload = path.join(work, "hung-directory.mjs");
+    // The bridge child's HOME is the fixture's fake home; hang the reads of
+    // its skills directory so the route's scanner waits on a stalled fs op.
+    await writeFile(
+      preload,
+      `import { Dir } from "node:fs";
+import path from "node:path";
+const marker = path.join(process.env.HOME ?? "", ".claude", "skills");
+const nativeRead = Dir.prototype.read;
+const nativeIterator = Dir.prototype[Symbol.asyncIterator];
+Dir.prototype.read = function (callback) {
+  if (this.path !== marker) return nativeRead.apply(this, arguments);
+  if (typeof callback === "function") return;
+  return new Promise(() => {});
+};
+Dir.prototype[Symbol.asyncIterator] = function () {
+  if (this.path !== marker) return nativeIterator.call(this);
+  return { next: () => new Promise(() => {}) };
+};
+`,
+    );
+    const host = await bridge({
+      home: { ".claude/skills/ok/SKILL.md": skill("ok", "Fine.") },
+      herdr: CLAUDE_HERDR,
+      env: { NODE_OPTIONS: `--import=${preload}`, MOSHPIT_POLL_MS: "3600000" },
+    });
+    try {
+      await page.goto("/");
+      const token = await loginBridge(page, host.url);
+      const device = await pairBridge(page, host.url, token);
+      const started = Date.now();
+      const { status, body } = await request(
+        page, host.url,
+        `?target=${encodeURIComponent("w1:p1")}&sessionId=${encodeURIComponent("sess-claude")}`,
+        token, device,
+      );
+      const elapsed = Date.now() - started;
+      expect(status).toBe(504);
+      expect((body?.error as { code?: string })?.code).toBe("scan_stopped");
+      expect(elapsed).toBeLessThan(4000);
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  });
 });
 
 test.describe("composer discovery", () => {
