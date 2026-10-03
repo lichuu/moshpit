@@ -493,6 +493,86 @@ test("an aborted scoped lookup keeps the cached root and never shares its promis
   release();
 });
 
+test("a late fulfilled lookup after abort does not refresh the shared cache", async () => {
+  const calls = [];
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const listWorktrees = async (cwd, signal) => {
+    calls.push(cwd);
+    if (signal) {
+      await gate;
+      return { worktrees: [{ path: "/repo/app", branch: "late", is_detached: false }] };
+    }
+    return { worktrees: [{ path: "/repo", branch: "main", is_detached: false }] };
+  };
+  const resolve = createProjectResolver(listWorktrees);
+  const first = await resolve("/repo/app");
+  assert.equal(first.root, "/repo");
+  const controller = new AbortController();
+  const scoped = resolve("/repo/app", { fresh: true, signal: controller.signal });
+  controller.abort();
+  release();
+  const late = await scoped;
+  assert.equal(late.root, "/repo/app", "the late value still reaches the caller");
+  const after = await resolve("/repo/app");
+  assert.equal(after.root, "/repo", "the late fulfillment did not refresh the cache");
+  assert.equal(calls.length, 2);
+});
+
+test("a signal-bound success refreshes the cache for ordinary polling", async () => {
+  const calls = [];
+  const listWorktrees = async (cwd, signal) => {
+    calls.push(cwd);
+    return { worktrees: [{ path: calls.length === 1 ? "/repo" : "/repo/app", branch: "main", is_detached: false }] };
+  };
+  const resolve = createProjectResolver(listWorktrees);
+  const first = await resolve("/repo/app");
+  assert.equal(first.root, "/repo");
+  const fresh = await resolve("/repo/app", { fresh: true, signal: new AbortController().signal });
+  assert.equal(fresh.root, "/repo/app");
+  const after = await resolve("/repo/app");
+  assert.equal(after.root, "/repo/app", "the signal-bound success refreshed the ordinary cache");
+  assert.equal(calls.length, 2, "ordinary polling read the refreshed cache");
+});
+
+test("an unreadable directory notes its source and keeps valid neighbors", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-s8-eio-"));
+  await writeTree(path.join(home, ".claude", "skills", "good", "SKILL.md"), "---\nname: good\ndescription: Fine.\n---\n");
+  const bad = path.join(home, ".agents", "skills");
+  await mkdir(bad, { recursive: true });
+  const { Dir } = await import("node:fs");
+  const nativeRead = Dir.prototype.read;
+  const nativeIterator = Dir.prototype[Symbol.asyncIterator];
+  let failures = 0;
+  const injected = () => {
+    failures += 1;
+    return Promise.reject(Object.assign(new Error("injected enumeration failure"), { code: "EIO" }));
+  };
+  Dir.prototype.read = function (callback) {
+    if (this.path !== bad) return nativeRead.apply(this, arguments);
+    if (typeof callback === "function") {
+      failures += 1;
+      return callback(Object.assign(new Error("injected enumeration failure"), { code: "EIO" }));
+    }
+    return injected();
+  };
+  Dir.prototype[Symbol.asyncIterator] = function () {
+    if (this.path !== bad) return nativeIterator.call(this);
+    return { next: injected };
+  };
+  try {
+    const catalog = await scanAgentCommands({ kind: "opencode", home, configHome: path.join(home, "config") });
+    assert.ok(failures > 0, "the probe reached the injected enumeration failure");
+    assert.equal(catalog.coverage, "partial");
+    assert.deepEqual(catalog.commands.map((c) => c.name), ["good"], "the valid neighbor still contributes");
+    assert.ok(catalog.warnings.includes("source_unreadable"), catalog.warnings.join(","));
+  } finally {
+    Dir.prototype.read = nativeRead;
+    Dir.prototype[Symbol.asyncIterator] = nativeIterator;
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 // --- whole-read ownership: directory reads, iterator cleanup and closes
 // stay on the shared stop; late results are observed, never unhandled.
 

@@ -40,7 +40,9 @@ export function createProjectResolver(listWorktrees) {
       // success refreshes the cache for ordinary polling.
       try {
         const value = projectFromWorktrees(cwd, await listWorktrees(cwd, signal));
-        remember(cwd, value);
+        // A fulfillment that lands after the abort is not a success for the
+        // request that was cancelled, so it must not refresh the cache.
+        if (!signal.aborted) remember(cwd, value);
         return value;
       } catch (error) {
         if (signal.aborted) throw error;
