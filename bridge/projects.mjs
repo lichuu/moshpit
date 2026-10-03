@@ -24,10 +24,31 @@ export function projectFromWorktrees(cwd, listed) {
 
 export function createProjectResolver(listWorktrees) {
   const cache = new Map();
-  return async (cwd) => {
+  const remember = (cwd, value) => {
+    cache.set(cwd, { result: Promise.resolve(value), expires: Date.now() + 60000 });
+    if (cache.size > 256) cache.delete(cache.keys().next().value);
+  };
+  return async (cwd, { fresh = false, signal } = {}) => {
     if (typeof cwd !== "string" || !isAbsolute(cwd) || typeof listWorktrees !== "function") return undefined;
-    const existing = cache.get(cwd);
-    if (existing && existing.expires > Date.now()) return existing.result;
+    if (!fresh) {
+      const existing = cache.get(cwd);
+      if (existing && existing.expires > Date.now()) return existing.result;
+    }
+    if (signal) {
+      // A signal-bound lookup is scoped work: it never becomes the shared
+      // cached promise, an abort keeps any valid cached root in place, and a
+      // success refreshes the cache for ordinary polling.
+      try {
+        const value = projectFromWorktrees(cwd, await listWorktrees(cwd, signal));
+        // A fulfillment that lands after the abort is not a success for the
+        // request that was cancelled, so it must not refresh the cache.
+        if (!signal.aborted) remember(cwd, value);
+        return value;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return undefined;
+      }
+    }
     const result = Promise.resolve(listWorktrees(cwd))
       .then((listed) => projectFromWorktrees(cwd, listed))
       .catch(() => undefined);

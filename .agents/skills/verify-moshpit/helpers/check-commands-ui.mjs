@@ -8,11 +8,15 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 // Phone behavior check: isolated bridge (own state dir, own port) in front of
-// the REAL read-only herdr snapshot, driving the app on the assigned 8191.
-// The composer suggestions come from the host's actual per-agent skill
-// catalogs (claude: ~/.claude/skills as /<name>, pi: ~/.pi/agent/skills
-// as /skill:<name>, codex: ~/.codex/skills as $<name>). No input is ever
-// sent to a pane; the check only types into the draft and taps.
+// the REAL read-only herdr snapshot, driving the app on a probed free port
+// (pass one as the first argument). The probe only finds a candidate; the
+// bridge and vite enforce ownership by refusing a taken port (EADDRINUSE /
+// --strictPort). The composer suggestions come from the host's actual
+// per-agent skill catalogs via the scoped request (claude: ~/.claude/skills
+// as /<name>, pi: ~/.pi/agent/skills as /skill:<name>, codex: ~/.codex/skills
+// as $<name>). Discovery never starts an agent: the bridge only reads fixed
+// home/XDG sources and reports partial. No input is ever sent to a pane; the
+// check only types into the draft and taps.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const { sendAdminRequest } = await import(path.join(root, "bridge/admin.mjs"));
 const user = "command-ui-check";
@@ -26,12 +30,19 @@ const piSkills = new Set(await readdir(path.join(userDir, ".pi", "agent", "skill
 assert.ok(claudeSkills.size > 0, "host has a real claude skill directory");
 assert.ok(piSkills.size > 0, "host has a real pi skill directory");
 
-const reserved = createServer();
-const port = await new Promise((resolve, reject) => {
-  reserved.once("error", reject);
-  reserved.listen(0, "127.0.0.1", () => resolve(reserved.address().port));
-});
-await new Promise((resolve) => reserved.close(resolve));
+// A free-port probe: it finds a candidate and closes before returning, so
+// the port is not held. Ownership is enforced by the strict binds below.
+const freePortProbe = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const port = probe.address().port;
+      probe.close(() => resolve(port));
+    });
+  });
+const port = await freePortProbe();
+const appPort = Number(process.argv[2] ?? (await freePortProbe()));
 const child = spawn(process.execPath, [path.join(root, "bridge/index.mjs")], {
   env: {
     ...process.env,
@@ -39,7 +50,7 @@ const child = spawn(process.execPath, [path.join(root, "bridge/index.mjs")], {
     MOSHPIT_BIND: "127.0.0.1",
     MOSHPIT_PUBLIC_ORIGIN: `http://127.0.0.1:${port}`,
     MOSHPIT_ALLOWED_AUTHORITIES: `127.0.0.1:${port}`,
-    MOSHPIT_ALLOWED_ORIGINS: "http://127.0.0.1:8191",
+    MOSHPIT_ALLOWED_ORIGINS: `http://127.0.0.1:${appPort}`,
     MOSHPIT_DEV_INSECURE: "1",
     MOSHPIT_AUTH_MODE: "password",
     MOSHPIT_PASSWORD_FILE: passwordFile,
@@ -50,7 +61,7 @@ const child = spawn(process.execPath, [path.join(root, "bridge/index.mjs")], {
   stdio: ["ignore", "pipe", "pipe"],
 });
 child.stderr.on("data", (buf) => console.error("bridge:", String(buf).trim()));
-const app = spawn(process.execPath, ["node_modules/.bin/vite", "--host", "127.0.0.1", "--port", "8191", "--strictPort"], {
+const app = spawn(process.execPath, ["node_modules/.bin/vite", "--host", "127.0.0.1", "--port", String(appPort), "--strictPort"], {
   cwd: root,
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -64,13 +75,13 @@ try {
     child.stdout.once("data", () => { clearTimeout(timer); resolve(); });
     child.once("exit", () => { clearTimeout(timer); reject(new Error("bridge exited")); });
   });
-  assert.ok(port, "bridge port reserved");
+  assert.ok(port, "bridge port probed");
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("vite startup timed out")), 30000);
     app.stdout.on("data", (buf) => { if (String(buf).includes("ready in")) { clearTimeout(timer); resolve(); } });
     app.once("exit", () => { clearTimeout(timer); reject(new Error("vite exited")); });
   });
-  console.log(`ok   isolated bridge 127.0.0.1:${port}, app 127.0.0.1:8191`);
+  console.log(`ok   isolated bridge 127.0.0.1:${port}, app 127.0.0.1:${appPort}`);
   const origin = `http://127.0.0.1:${port}`;
   const login = await fetch(`${origin}/api/login`, {
     method: "POST",
@@ -142,7 +153,7 @@ try {
       sends.push(request.url());
     }
   });
-  await page.goto(`http://127.0.0.1:8191/`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${appPort}/`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.waitForTimeout(150);
   await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -166,7 +177,12 @@ try {
     for (const toggle of await page.locator('button[aria-label^="Project "][aria-expanded="false"]').all()) {
       await toggle.click();
     }
-    await page.getByRole("button", { name: card, exact: true }).click();
+    // The card's accessible name carries its whole content, so anchor the
+    // match on the label; an ambiguous match is a failure, not a guess.
+    const escaped = card.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = page.getByRole("button", { name: new RegExp(`^${escaped}`) });
+    assert.equal(await matches.count(), 1, `agent card "${card}" is unambiguous`);
+    await matches.first().click();
     const chatView = page.getByRole("button", { name: "Chat" });
     if (await chatView.count()) await chatView.click();
     await prompt.waitFor({ state: "visible", timeout: 15000 });
