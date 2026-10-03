@@ -567,7 +567,7 @@ test("a late fulfilled lookup after abort does not refresh the shared cache", as
 
 test("a signal-bound success refreshes the cache for ordinary polling", async () => {
   const calls = [];
-  const listWorktrees = async (cwd, signal) => {
+  const listWorktrees = async (cwd) => {
     calls.push(cwd);
     return { worktrees: [{ path: calls.length === 1 ? "/repo" : "/repo/app", branch: "main", is_detached: false }] };
   };
@@ -650,7 +650,7 @@ test("a stalled directory read stops the scan at the deadline", { timeout: 10000
       (error) => error instanceof ScanStoppedError,
     );
     assert.ok(Date.now() - started < 900, "the shared stop won, not an outer timeout");
-    assert.ok(entered > 0, "the probe reached the real directory read");
+    assert.ok(entered > 0, "the probe reached the injected iterator wait");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(unhandled, [], "the pending read stayed observed");
   } finally {

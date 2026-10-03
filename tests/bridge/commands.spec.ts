@@ -206,9 +206,10 @@ esac`,
     page,
     bridge,
   }) => {
-    const { rm, writeFile } = await import("node:fs/promises");
-    const TRIGGER = "/tmp/moshpit-e2e-commands-hang";
-    await rm(TRIGGER, { force: true });
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const work = await mkdtemp(path.join(tmpdir(), "moshpit-e2e-hang-"));
+    const TRIGGER = path.join(work, "trigger");
     try {
       const host = await bridge({
         home: { ".claude/skills/x/SKILL.md": skill("x", "d") },
@@ -235,7 +236,7 @@ esac`,
       expect((body?.error as { code?: string })?.code).toBe("scan_stopped");
       expect(Date.now() - startedAt).toBeLessThan(10_000);
     } finally {
-      await rm(TRIGGER, { force: true });
+      await rm(work, { recursive: true, force: true });
     }
   });
 
@@ -323,8 +324,6 @@ Dir.prototype[Symbol.asyncIterator] = function () {
 });
 
 test.describe("composer discovery", () => {
-  const TRIGGER = "/tmp/moshpit-e2e-commands-trigger";
-
   const twoAgentHerdr = (body: string) => `
 case "$*" in
   "api snapshot"*) ${body} ;;
@@ -364,9 +363,10 @@ esac`;
     page,
     bridge,
   }, testInfo) => {
-    const { rm, writeFile } = await import("node:fs/promises");
-    const TRIGGER = "/tmp/moshpit-e2e-commands-late";
-    await rm(TRIGGER, { force: true });
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const work = await mkdtemp(path.join(tmpdir(), "moshpit-e2e-late-"));
+    const TRIGGER = path.join(work, "trigger");
     const host = await bridge({
       home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
       herdr: twoAgentHerdr(
@@ -414,7 +414,7 @@ esac`;
       await expect(listbox.getByRole("option", { name: /deploy-thing/ })).toHaveCount(0);
       await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
     } finally {
-      await rm(TRIGGER, { force: true });
+      await rm(work, { recursive: true, force: true });
     }
   });
 
@@ -422,8 +422,10 @@ esac`;
     page,
     bridge,
   }, testInfo) => {
-    const { rm, writeFile } = await import("node:fs/promises");
-    await rm(TRIGGER, { force: true });
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const work = await mkdtemp(path.join(tmpdir(), "moshpit-e2e-retry-"));
+    const TRIGGER = path.join(work, "trigger");
     const host = await bridge({
       home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
       herdr: twoAgentHerdr(
@@ -461,7 +463,7 @@ esac`;
       await expect(listbox).toBeVisible();
       await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
     } finally {
-      await rm(TRIGGER, { force: true });
+      await rm(work, { recursive: true, force: true });
     }
   });
 
@@ -469,9 +471,10 @@ esac`;
     page,
     bridge,
   }) => {
-    const { rm, writeFile } = await import("node:fs/promises");
-    const DRIFT = "/tmp/moshpit-e2e-commands-drift";
-    await rm(DRIFT, { force: true });
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const work = await mkdtemp(path.join(tmpdir(), "moshpit-e2e-drift-"));
+    const DRIFT = path.join(work, "trigger");
     const drifted = { ...CLAUDE_AGENT, cwd: "/repo/other" };
     const host = await bridge({
       home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
@@ -516,7 +519,7 @@ esac`,
       await expect(prompt).toHaveValue("/");
       expect(sends).toEqual([]);
     } finally {
-      await rm(DRIFT, { force: true });
+      await rm(work, { recursive: true, force: true });
     }
   });
 
@@ -622,7 +625,7 @@ esac`,
     expect(sends).toEqual([]);
   });
 
-  test("a delayed prefix restoration yields to a newer edit and caret move", async ({
+  test("a prefix insertion lands with the caret after the prefix, and a later edit owns the caret", async ({
     page,
     bridge,
   }) => {
@@ -635,36 +638,24 @@ esac`,
     const prompt = page.getByPlaceholder("Message this agent…");
     await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
     await prompt.waitFor({ state: "visible", timeout: 20_000 });
-    // Hold the deferred caret-restoration frame so the edit can land first.
-    await page.evaluate(() => {
-      (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames = [];
-      const native = window.requestAnimationFrame.bind(window);
-      window.requestAnimationFrame = (fn: FrameRequestCallback) => {
-        if (!String(fn).includes("setSelectionRange")) return native(fn);
-        (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.push(fn);
-        return 900000;
-      };
-    });
     await prompt.fill("draft");
     await page.getByRole("button", { name: "Insert slash command", exact: true }).click();
     await expect(prompt).toHaveValue("draft /");
-    // A newer edit and a user caret move own the caret before the deferred
-    // frame runs; the frame must yield instead of restoring the old caret.
+    await expect
+      .poll(() => prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart), { timeout: 5_000 })
+      .toBe("draft /".length);
+    // A later user edit and caret move own the caret; nothing restores the
+    // insertion point after them.
     await prompt.fill("newer words");
     await prompt.press("Home");
     await prompt.press("ArrowRight");
     await prompt.press("ArrowRight");
-    const frames = await page.evaluate(() => {
-      const held = (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.splice(0);
-      for (const fn of held) fn(performance.now());
-      return held.length;
-    });
-    expect(frames).toBeGreaterThan(0);
-    const caret = await prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
-    expect(caret).toBe(2);
+    await expect
+      .poll(() => prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart), { timeout: 5_000 })
+      .toBe(2);
   });
 
-  test("an edit returning to identical text still owns the caret over a delayed restoration", async ({
+  test("a same-text re-selection keeps the caret where a later End puts it", async ({
     page,
     bridge,
   }) => {
@@ -681,43 +672,88 @@ esac`,
     const prompt = page.getByPlaceholder("Message this agent…");
     await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
     await prompt.waitFor({ state: "visible", timeout: 20_000 });
-    // Hold the deferred caret-restoration frames so the edit can land first.
-    await page.evaluate(() => {
-      (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames = [];
-      const native = window.requestAnimationFrame.bind(window);
-      window.requestAnimationFrame = (fn: FrameRequestCallback) => {
-        if (!String(fn).includes("setSelectionRange")) return native(fn);
-        (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.push(fn);
-        return 900000;
-      };
-    });
     await prompt.fill("please /mod keep-args");
     await caretTo(prompt, 11);
     await expect(page.getByRole("option", { name: /^\/model/ })).toBeVisible({ timeout: 15_000 });
     await prompt.press("Enter");
     await expect(prompt).toHaveValue("please /model keep-args");
-    // An edit that returns to identical text still bumps the draft revision.
+    await expect
+      .poll(() => prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart), { timeout: 5_000 })
+      .toBe("please /model".length);
+    // The caret sits at the end of the /model token, so selecting it again
+    // rewrites identical text. A genuine End after that must stick.
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue("please /model keep-args");
     await prompt.press("End");
-    await prompt.type("x");
-    await prompt.press("Backspace");
-    const frames = await page.evaluate(() => {
-      const held = (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.splice(0);
-      for (const fn of held) fn(performance.now());
-      return held.length;
-    });
-    expect(frames).toBeGreaterThan(0);
-    const state = await prompt.evaluate((el) => {
-      const t = el as HTMLTextAreaElement;
-      return {
-        value: t.value,
-        caret: t.selectionStart,
-        focused: document.activeElement === el,
-      };
-    });
-    expect(state.value).toBe("please /model keep-args");
-    expect(state.caret).toBe("please /model keep-args".length);
-    expect(state.focused).toBe(true);
+    await expect
+      .poll(() => prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart), { timeout: 5_000 })
+      .toBe("please /model keep-args".length);
     expect(sends).toEqual([]);
+  });
+
+  test("a held pointer refuses to complete after a caret-only token drift", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const sends: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/api\/(submit|action)$/.test(request.url())) sends.push(request.url());
+    });
+    const prompt = page.getByPlaceholder("Message this agent…");
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await prompt.fill("/mo then /mo");
+    await caretTo(prompt, 3);
+    const listbox = page.getByRole("listbox", { name: "Command suggestions" });
+    const option = listbox.getByRole("option", { name: /^\/model/ }).first();
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    const box = await option.boundingBox();
+    if (!box) throw new Error("option is not visible");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    // A genuine caret-only move to the second identical token while the
+    // pointer is held: the captured gesture is now stale.
+    await caretTo(prompt, 12);
+    await page.mouse.up();
+    await expect(prompt).toHaveValue("/mo then /mo");
+    expect(sends).toEqual([]);
+  });
+
+  test("an insertion never steals focus back from a later control", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const prompt = page.getByPlaceholder("Message this agent…");
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await prompt.fill("please /mod keep-args");
+    await caretTo(prompt, 11);
+    await expect(page.getByRole("option", { name: /^\/model/ })).toBeVisible({ timeout: 15_000 });
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue("please /model keep-args");
+    const hosts = page.getByRole("button", { name: "Hosts", exact: true });
+    await hosts.focus();
+    // Give a deferred restoration frame time to steal the focus back.
+    await page.waitForTimeout(150);
+    await expect(hosts).toBeFocused();
+    const cursor = await prompt.evaluate((el) => {
+      const t = el as HTMLTextAreaElement;
+      return { text: t.value, caret: t.selectionStart };
+    });
+    expect(cursor.text).toBe("please /model keep-args");
+    expect(cursor.caret).toBe("please /model".length);
   });
 
   test("IME composition suppresses the list until it ends", async ({
