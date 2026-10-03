@@ -406,34 +406,80 @@ test("an already-aborted signal rejects before spawning, missing binary or not",
 
 test("an abort escalates to SIGKILL and the child actually stops", { timeout: 15000 }, async () => {
   const ticks = path.join(STUB_DIR, "ticks");
+  const ready = path.join(STUB_DIR, "ready");
+  const sigterm = path.join(STUB_DIR, "sigterm");
   const bin = await stub(
     "stub",
     `
 const fs = require("fs");
-process.on("SIGTERM", () => {});
+process.on("SIGTERM", () => {
+  try { fs.writeFileSync(process.env.STUB_SIGTERM, "sigterm"); } catch {}
+});
+fs.writeFileSync(process.env.STUB_READY, String(process.pid));
 setInterval(() => {
   try { fs.appendFileSync(process.env.STUB_TICKS, "t"); } catch {}
 }, 20);
 `,
   );
-  const saved = process.env.STUB_TICKS;
-  process.env.STUB_TICKS = ticks;
+  const saved = {};
+  for (const [key, value] of Object.entries({ STUB_TICKS: ticks, STUB_READY: ready, STUB_SIGTERM: sigterm })) {
+    saved[key] = process.env[key];
+    process.env[key] = value;
+  }
+  const waitForFile = async (file, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const content = await readFile(file, "utf8").catch(() => "");
+      if (content) return content;
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${file}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+  let pid = 0;
   try {
     const controller = new AbortController();
     const pending = run(bin, [], controller.signal);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Readiness: the SIGTERM handler is installed and the PID is known
+    // before the abort, so the resistance below is proven, not assumed.
+    pid = Number(await waitForFile(ready, 5000));
+    assert.ok(Number.isInteger(pid) && pid > 0, "the child reported its PID");
+    const count = () => readFile(ticks, "utf8").then((s) => s.length).catch(() => 0);
+    const tickDeadline = Date.now() + 2000;
+    while ((await count()) === 0) {
+      if (Date.now() > tickDeadline) throw new Error("the child never ticked");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     controller.abort();
     await assert.rejects(pending, (error) => /aborted/.test(error.message));
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    const count = () => readFile(ticks, "utf8").then((s) => s.length).catch(() => 0);
-    const first = await count();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const second = await count();
-    assert.equal(second, first, "the SIGTERM-resistant child stopped after the grace kill");
+    // Explicit ignored-SIGTERM evidence: the child recorded the signal
+    // without exiting, so the escalation had to do the killing.
+    await waitForFile(sigterm, 2000);
+    // Past the 500 ms grace: the escalation must have killed and reaped it.
+    const deathDeadline = Date.now() + 2000;
+    for (;;) {
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+      if (!alive) break;
+      if (Date.now() > deathDeadline) throw new Error("the child survived the grace kill");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   } finally {
-    if (saved === undefined) delete process.env.STUB_TICKS;
-    else process.env.STUB_TICKS = saved;
-    await rm(ticks, { force: true });
+    // A failure before the abort would otherwise leak the child and its
+    // pipes, holding the test process open.
+    try {
+      if (pid) process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    for (const file of [ticks, ready, sigterm]) await rm(file, { force: true });
   }
 });
 
