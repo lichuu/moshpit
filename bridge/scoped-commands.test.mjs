@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { after, test } from "node:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CommandScopeError, ScanStoppedError, projectToken, scanAgentCommands, scopedCatalog } from "./commands.mjs";
@@ -155,6 +155,33 @@ test("the revision changes with the inventory the scan inspected", async () => {
 test("the project token is the existing snapshot metadata, serialized identically", () => {
   assert.equal(projectToken({ projectRoot: undefined, cwd: "/a" }), JSON.stringify([null, "/a"]));
   assert.equal(projectToken({ projectRoot: "/repo", cwd: "/repo/app" }), JSON.stringify(["/repo", "/repo/app"]));
+});
+
+test("a reciprocal swap between two sources with one origin changes the revision", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-s8-slot-"));
+  const a = path.join(home, "a.md");
+  const b = path.join(home, "b.md");
+  await writeFile(a, "---\nname: x\ndescription: A.\n---\n");
+  await writeFile(b, "---\nname: x\ndescription: B.\n---\n");
+  const stamp = new Date(1700000000000);
+  await utimes(a, stamp, stamp);
+  await utimes(b, stamp, stamp);
+  const roots = [path.join(home, ".claude", "skills", "x"), path.join(home, ".agents", "skills", "x")];
+  for (const root of roots) await mkdir(root, { recursive: true });
+  const links = roots.map((root) => path.join(root, "SKILL.md"));
+  await symlink(a, links[0]);
+  await symlink(b, links[1]);
+  const scan = () =>
+    scanAgentCommands({ kind: "opencode", home, configHome: path.join(home, "config") });
+  const before = await scan();
+  await unlink(links[0]);
+  await unlink(links[1]);
+  await symlink(b, links[0]);
+  await symlink(a, links[1]);
+  const after = await scan();
+  assert.notDeepEqual(before.commands, after.commands, "the precedence winner changed");
+  assert.notEqual(before.revision, after.revision, "distinct source slots stay distinct in the revision");
+  await rm(home, { recursive: true, force: true });
 });
 
 // --- fake herdr: the shared deadline covers the read-only subprocess waits,

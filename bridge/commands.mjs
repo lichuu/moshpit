@@ -297,7 +297,9 @@ async function readBounded(file, at, scan, state) {
     return null;
   }
   const { fd, stats } = opened;
-  state.fingerprint.add(`${scan.origin}:${at}:${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`);
+  // The slot is the scan's base and directory, a stable unique source key:
+  // two sources that share a display origin must keep distinct records.
+  state.fingerprint.add(`${scan.slot}:${at}:${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`);
   try {
     if (stats.size > FILE_LIMIT) {
       state.truncated = true;
@@ -491,10 +493,10 @@ async function scanSource(scan, bases, state) {
     if (error instanceof ScanStoppedError) throw error;
     const missing = Boolean(error?.code) && MISSING_CODES.has(error.code);
     state.note(missing ? W.missing : W.unreadable);
-    state.fingerprint.add(`${missing ? "missing" : "unreadable"}:${scan.origin}:${scan.base}/${scan.dir.join("/")}`);
+    state.fingerprint.add(`${missing ? "missing" : "unreadable"}:${scan.slot}`);
     return;
   }
-  state.fingerprint.add(`root:${scan.origin}:${real}`);
+  state.fingerprint.add(`root:${scan.slot}:${real}`);
   if (scan.layout === "template") {
     await scanLevel(root, (entry) => (entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith(".md"), null, scan, state);
     return;
@@ -545,7 +547,7 @@ async function scanKind({ kind, home, configHome }, state) {
   for (const scan of source.scans) {
     state.stopped();
     if (state.full()) break;
-    await scanSource({ ...scan, source, kind }, bases, state);
+    await scanSource({ ...scan, source, kind, slot: `${scan.base}/${scan.dir.join("/")}` }, bases, state);
   }
   state.stopped();
   state.commands.sort((a, b) => a.name.localeCompare(b.name));
