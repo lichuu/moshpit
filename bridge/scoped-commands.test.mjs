@@ -644,16 +644,25 @@ test("a stalled directory read stops the scan at the deadline", { timeout: 10000
     return { next: () => new Promise(() => {}) };
   };
   const started = Date.now();
+  // A referenced outer watchdog keeps the event loop alive while the
+  // synthetic wait never settles: the 100 ms production deadline still
+  // wins, and a broken stop fails here instead of an idle-loop cancel.
+  const watchdog = setTimeout(() => {
+    throw new Error("the outer watchdog fired before the production stop");
+  }, 5000);
   try {
     await assert.rejects(
       scanAgentCommands({ kind: "claude", home, signal: AbortSignal.timeout(100), deadlineMs: 100 }),
-      (error) => error instanceof ScanStoppedError,
+      // Both the test's 100 ms signal and the scanner deadline are genuine
+      // production stops; which timer wins the tie is runtime-dependent.
+      (error) => error instanceof ScanStoppedError && (error.reason === "deadline" || error.reason === "aborted"),
     );
     assert.ok(Date.now() - started < 900, "the shared stop won, not an outer timeout");
     assert.ok(entered > 0, "the probe reached the injected iterator wait");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(unhandled, [], "the pending read stayed observed");
   } finally {
+    clearTimeout(watchdog);
     Dir.prototype.read = nativeRead;
     Dir.prototype[Symbol.asyncIterator] = nativeIterator;
     process.removeListener("unhandledRejection", onUnhandled);
@@ -689,16 +698,20 @@ test("a stalled close after a timed-out stat does not hold the caller", { timeou
   };
   syncBuiltinESMExports();
   const started = Date.now();
+  const watchdog = setTimeout(() => {
+    throw new Error("the outer watchdog fired before the production stop");
+  }, 5000);
   try {
     await assert.rejects(
       scanAgentCommands({ kind: "claude", home, signal: AbortSignal.timeout(100), deadlineMs: 100 }),
-      (error) => error instanceof ScanStoppedError,
+      (error) => error instanceof ScanStoppedError && (error.reason === "deadline" || error.reason === "aborted"),
     );
     assert.ok(Date.now() - started < 900, "cleanup did not hold the bounded caller");
     assert.ok(closes > 0, "the descriptor close was attempted");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(unhandled, [], "the stalled close stayed observed");
   } finally {
+    clearTimeout(watchdog);
     fs.open = nativeOpen;
     syncBuiltinESMExports();
     process.removeListener("unhandledRejection", onUnhandled);
