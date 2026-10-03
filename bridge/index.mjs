@@ -14,8 +14,7 @@ import { fileURLToPath } from "node:url";
 import webpush from "web-push";
 import { createPushDelivery, createPushReporter, createPushSender, createTransitionTracker, openPushStore, parsePushSubscription, PushError, pushAvailability } from "./push-delivery.mjs";
 import { createHerdr, herdrInput, isHerdrKind } from "./herdr.mjs";
-import { listAgentCommands } from "./commands.mjs";
-import { createPiCommands } from "./pi-commands.mjs";
+import { listAgentCommands, scopedCatalog, CommandScopeError, ScanStoppedError, DEFAULT_DEADLINE_MS } from "./commands.mjs";
 import { createDiagnosticLimiter, DiagnosticError, MAX_DIAGNOSTIC_BYTES, parseDiagnostic } from "./diagnostics.mjs";
 import { createUploads, MAX_PROMPT_BODY, RequestError, readUploadedImage } from "./upload.mjs";
 import { safeJoin } from "./paths.mjs";
@@ -114,7 +113,6 @@ const herdr = createHerdr({
 const uploads = await createUploads({ stateDir: STATE_DIR });
 const diagnosticLimiter = createDiagnosticLimiter();
 const sessionReader = createSessionReader();
-const piCommands = createPiCommands();
 const submissions = createSubmissions({
   stateDir: STATE_DIR,
   herdr,
@@ -656,34 +654,80 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && pathname === "/api/commands") {
-      // Read-only, kind-validated catalog read: the client supplies the agent
-      // kind only; the bridge resolves it to a fixed skill directory.
-      const kind = url.searchParams.get("agent") ?? "";
-      const catalog = await listAgentCommands(kind);
-      // A pi pane can be asked for its live list (extension commands exist
-      // only there). The client names the pane, never a path: the directory
-      // comes from herdr's snapshot. The client asks for this after showing
-      // the disk catalog, so a slow or missing pi only costs the upgrade.
-      const target = url.searchParams.get("target");
-      if (kind === "pi" && target) {
-        const snapshot = await herdr.snapshot();
-        const agent = snapshot.agents.find((candidate) => candidate.id === target);
-        if (!agent) {
-          json(res, 404, { error: "Unknown agent." });
-          return;
-        }
-        if (agent.kind === "pi") {
-          try {
-            const commands = await piCommands.list(agent.cwd);
-            json(res, 200, { ...catalog, commands, coverage: "full", live: true });
-            return;
-          } catch {
-            json(res, 200, { ...catalog, live: false });
+      const params = url.searchParams;
+      if (params.has("target") || params.has("sessionId")) {
+        for (const name of new Set(params.keys())) {
+          if (name !== "target" && name !== "sessionId") {
+            json(res, 400, { error: { code: "command_request_invalid", message: "Name the pane and its session only." } });
             return;
           }
         }
+        for (const name of ["target", "sessionId"]) {
+          if (params.getAll(name).length > 1) {
+            json(res, 400, { error: { code: "command_request_invalid", message: "Name the pane and its session only." } });
+            return;
+          }
+        }
+        const target = params.get("target") ?? "";
+        const sessionId = params.get("sessionId") ?? "";
+        if (!target || !sessionId || target.length > 512 || sessionId.length > 4096) {
+          json(res, 400, { error: { code: "command_request_invalid", message: "Name the pane and its session only." } });
+          return;
+        }
+        const controller = new AbortController();
+        let disconnected = false;
+        const deadline = setTimeout(() => controller.abort(), DEFAULT_DEADLINE_MS);
+        deadline.unref?.();
+        const onClose = () => {
+          disconnected = true;
+          controller.abort();
+        };
+        req.on("close", onClose);
+        try {
+          const catalog = await scopedCatalog({
+            snapshot: (options) => herdr.snapshot(options),
+            target,
+            sessionId,
+            signal: controller.signal,
+          });
+          if (res.writableEnded || disconnected) return;
+          if (controller.signal.aborted) {
+            json(res, 504, { error: { code: "scan_stopped", message: "The command scan stopped before it finished." } });
+            return;
+          }
+          json(res, 200, catalog);
+        } catch (err) {
+          if (res.writableEnded || disconnected) return;
+          if (err instanceof CommandScopeError) {
+            json(res, err.code === "command_target_unknown" ? 404 : 409, { error: { code: err.code, message: err.message } });
+          } else if (err instanceof ScanStoppedError || controller.signal.aborted) {
+            json(res, 504, { error: { code: "scan_stopped", message: "The command scan stopped before it finished." } });
+          } else {
+            console.error("command discovery failed:", err);
+            json(res, 500, { error: { code: "commands_failed", message: "Command discovery failed." } });
+          }
+        } finally {
+          clearTimeout(deadline);
+          req.off("close", onClose);
+        }
+        return;
       }
-      json(res, 200, catalog);
+      if (params.size !== 1 || !params.has("agent") || params.getAll("agent").length > 1) {
+        json(res, 400, { error: { code: "command_request_invalid", message: "Name the agent kind only." } });
+        return;
+      }
+      const kind = params.get("agent") ?? "";
+      try {
+        const catalog = await listAgentCommands(kind);
+        json(res, 200, catalog);
+      } catch (err) {
+        if (err instanceof ScanStoppedError) {
+          json(res, 504, { error: { code: "scan_stopped", message: "The command scan stopped before it finished." } });
+        } else {
+          console.error("command discovery failed:", err);
+          json(res, 500, { error: { code: "commands_failed", message: "Command discovery failed." } });
+        }
+      }
       return;
     }
     if (req.method === "GET" && pathname === "/api/repo-root") {

@@ -43,6 +43,26 @@ test.describe("terminal commands", () => {
     await expect(pane).toContainText("> /compact");
   });
 
+  test("the ninth result is reachable by keyboard and inserts without sending", async ({ demo }) => {
+    await openTerminal(demo, "auth-rewrite");
+    const pane = demo.getByRole("application", { name: /^Pane / });
+    await demo.locator(".terminal-keys").getByRole("button", { name: "Insert slash command" }).click();
+    const input = demo.getByRole("textbox", { name: "Terminal input" });
+    const list = demo.getByRole("listbox", { name: "Command suggestions" });
+    await expect(list).toBeVisible();
+    const options = list.getByRole("option");
+    expect(await options.count()).toBeGreaterThan(8);
+    const ninth = (await options.nth(8).getAttribute("aria-label")) ?? "";
+    expect(ninth).toBeTruthy();
+    for (let i = 0; i < 8; i += 1) await input.press("ArrowDown");
+    const selected = list.getByRole("option", { selected: true });
+    await expect(selected).toHaveCount(1);
+    await expect(selected).toHaveAttribute("aria-label", ninth);
+    await input.press("Enter");
+    await expect(input).toHaveValue(`${ninth.split(":")[0]} `);
+    await expect(pane).not.toContainText(ninth.split(":")[0]);
+  });
+
   test("codex lists / built-ins beside its $ skills", async ({ demo }) => {
     await openTerminal(demo, "migrate");
     const input = demo.getByRole("textbox", { name: "Terminal input" });

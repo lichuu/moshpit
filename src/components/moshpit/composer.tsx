@@ -7,7 +7,7 @@ import { newId } from "@/lib/moshpit/events";
 import { draftStore, listDrafts, useDraft } from "@/lib/moshpit/drafts";
 import type { DraftKey } from "@/lib/moshpit/drafts";
 import { bridgeUrl, encodeImage, fetchCommands } from "@/lib/moshpit/bridge";
-import { detectCommandToken, insertPrefix, insertSuggestion, matchCommands, mergeCatalog, type CommandSuggestion } from "@/lib/moshpit/commands";
+import { commandScope, detectCommandToken, insertPrefix, insertSuggestion, matchCommands, mergeCatalog, type CommandSuggestion, type DisplayCatalog, type RemoteCatalog, type TokenRange } from "@/lib/moshpit/commands";
 import { builtinCommands, collisionPolicy } from "@/lib/moshpit/builtin-commands";
 import { submitSession } from "@/lib/moshpit/session";
 import type { InputMode, Receipt, SessionCapabilities } from "@/lib/moshpit/session-protocol";
@@ -85,6 +85,7 @@ export const Composer = memo(function Composer(props: Props) {
 function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot }: Props & { draftKey: DraftKey }) {
   const saved = useDraft(draftKey);
   const { draft } = saved;
+  const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
   const host = useMoshpitStore((s) => s.hosts.find((h) => h.id === s.connectedHostId));
   const ready = useMoshpitStore((s) => s.hostAccess.status === "ready");
   const prompt = useMoshpitStore((s) => s.prompt);
@@ -129,10 +130,67 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const [dismissedToken, setDismissedToken] = useState<string | null>(null);
   const [answerLock, setAnswerLock] = useState<{ token: string; key: string; attempt: number } | null>(null);
   const answerAttempt = useRef(0);
-  const [remoteCatalog, setRemoteCatalog] = useState<Awaited<ReturnType<typeof fetchCommands>> | undefined>();
-  const [catalogStatus, setCatalogStatus] = useState<"idle" | "loading" | "ready" | "failed" | "unavailable">("idle");
   const [activeIndex, setActiveIndex] = useState(0);
   const catalogGen = useRef(0);
+  const [refresh, setRefresh] = useState(0);
+  const agentId = agent.id;
+  const agentSessionId = agent.sessionId;
+  const agentCwd = agent.cwd;
+  const agentProjectRoot = agent.projectRoot;
+  const scope = useMemo(
+    () => commandScope({ id: agentId, sessionId: agentSessionId, cwd: agentCwd, projectRoot: agentProjectRoot }),
+    [agentId, agentSessionId, agentCwd, agentProjectRoot],
+  );
+  const catalogUrl = online && host && !host.demo && agent.kind !== "shell" ? bridgeUrl(host) : "";
+  const discoveryKey = JSON.stringify([
+    hostId,
+    catalogUrl,
+    agent.id,
+    agent.sessionId ?? null,
+    agent.kind,
+    scope?.project ?? null,
+    refresh,
+  ]);
+  type DiscoveryState =
+    | { key: string; status: "loading" }
+    | { key: string; status: "unavailable" }
+    | { key: string; status: "failed"; message: string }
+    | { key: string; status: "ready"; value: RemoteCatalog };
+  const [discovery, setDiscovery] = useState<DiscoveryState>(() => ({
+    key: discoveryKey,
+    status: scope && catalogUrl ? "loading" : "unavailable",
+  }));
+  useEffect(() => {
+    const gen = ++catalogGen.current;
+    const key = discoveryKey;
+    if (!scope || !catalogUrl) {
+      setDiscovery({ key, status: "unavailable" });
+      return;
+    }
+    setDiscovery({ key, status: "loading" });
+    const controller = new AbortController();
+    fetchCommands(catalogUrl, scope, controller.signal)
+      .then((value) => {
+        if (catalogGen.current !== gen || controller.signal.aborted) return;
+        setDiscovery({ key, status: "ready", value });
+      })
+      .catch((error) => {
+        if (catalogGen.current !== gen || controller.signal.aborted) return;
+        setDiscovery({
+          key,
+          status: "failed",
+          message: error instanceof Error ? error.message : "Command discovery failed.",
+        });
+      });
+    return () => controller.abort();
+  }, [discoveryKey, scope, catalogUrl]);
+  const liveDiscovery = discovery.key === discoveryKey ? discovery : null;
+  const remote: DisplayCatalog | undefined =
+    liveDiscovery?.status === "ready" ? liveDiscovery.value.catalog : undefined;
+  const catalog = useMemo(
+    () => mergeCatalog(builtinCommands(agent.kind), remote, collisionPolicy(agent.kind)),
+    [agent.kind, remote],
+  );
   // Terminal input only needs a paired device; native sends need the exact
   // session identity so they cannot land in a different session.
   const unavailable = (!online && !host?.demo) || !saved.loaded || (!host?.demo && !ready) || (!host?.demo && !terminal && !agent.sessionId);
@@ -150,49 +208,6 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   useEffect(() => {
     if (!answerToken || answerLock?.token !== answerToken) setAnswerLock(null);
   }, [answerToken, answerLock?.token]);
-  // The agent's skill catalog is read from the bridge once per (host, kind).
-  // A demo host has no bridge, and an offline host keeps whatever it had.
-  // Built-ins need no bridge, so they work in the demo and offline too.
-  const catalogUrl = online && host && !host.demo && agent.kind !== "shell" ? bridgeUrl(host) : "";
-  useEffect(() => {
-    const gen = ++catalogGen.current;
-    setRemoteCatalog(undefined);
-    if (!catalogUrl) {
-      setCatalogStatus("unavailable");
-      return;
-    }
-    const controller = new AbortController();
-    setCatalogStatus("loading");
-    // Set once pi's live list lands, so a slower disk read cannot replace it.
-    let live = false;
-    fetchCommands(catalogUrl, agent.kind, controller.signal)
-      .then((value) => {
-        if (catalogGen.current !== gen || controller.signal.aborted || live) return;
-        setRemoteCatalog(value);
-        setCatalogStatus("ready");
-      })
-      .catch(() => { if (catalogGen.current === gen) setCatalogStatus("failed"); });
-    // Pi's extension commands exist only in a running pi, so the bridge asks
-    // one for this pane. That can take seconds; the disk catalog above is
-    // already usable, and this swaps in the full list when it lands. A
-    // failure keeps the disk catalog and says nothing: it is still correct.
-    if (agent.kind === "pi") {
-      fetchCommands(catalogUrl, agent.kind, controller.signal, agent.id)
-        .then((value) => {
-          if (catalogGen.current !== gen || controller.signal.aborted) return;
-          if (value.coverage !== "full") return;
-          live = true;
-          setRemoteCatalog(value);
-          setCatalogStatus("ready");
-        })
-        .catch(() => {});
-    }
-    return () => { controller.abort(); };
-  }, [catalogUrl, agent.kind, agent.id]);
-  const catalog = useMemo(
-    () => mergeCatalog(builtinCommands(agent.kind), remoteCatalog, collisionPolicy(agent.kind)),
-    [agent.kind, remoteCatalog],
-  );
   // The prefix the insert button types: / where the harness has slash
   // commands, since it reaches the most of them, else the skill prefix.
   const buttonPrefix = catalog ? (catalog.prefixes.includes("/") ? "/" : catalog.prefixes[0]) : "";
@@ -207,6 +222,29 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const selected = shown[selectedIndex];
   const listId = useId();
   const optionList = useRef<HTMLUListElement>(null);
+  // The identity a pointer gesture began under, captured at pointerdown:
+  // the discovery key, the draft revision and the token range. A click that
+  // lands after any of them moved is stale and must not write the draft.
+  const gesture = useRef<{ key: string; revision: number; start: number; end: number; token: string; invocation: string } | null>(null);
+  const caretMoves = useRef(0);
+  const noMatch = Boolean(activeToken && catalog && matches.length === 0 && (dismissedToken === null || dismissedToken !== tokenString));
+  const discoveryNote = (() => {
+    if (!liveDiscovery) return null;
+    switch (liveDiscovery.status) {
+      case "loading":
+        return "Loading commands…";
+      case "unavailable":
+        return "Command discovery is unavailable for this session.";
+      case "failed":
+        return "Could not load commands. Type them anyway.";
+      case "ready": {
+        if (liveDiscovery.value.catalog.coverage === "unsupported") return "Command discovery is unavailable for this agent.";
+        if (liveDiscovery.value.truncated) return "Commands list is truncated.";
+        if (liveDiscovery.value.catalog.coverage === "partial") return "Commands may be incomplete.";
+        return null;
+      }
+    }
+  })();
   useEffect(() => { setActiveIndex(0); }, [tokenString]);
   // The list scrolls at eight rows, so arrowing past the fold has to bring
   // the highlighted row back into view or the selection goes invisible.
@@ -275,22 +313,39 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   }
   // Insertion never sends: it edits the draft through the same revision path
   // as typing, then restores focus and the caret to the inserted token.
-  function chooseCommand(command: CommandSuggestion) {
+  function chooseCommand(command: CommandSuggestion, fromPointer: boolean) {
     if (!catalog || busy) return;
     const input = textarea.current;
     if (!input) return;
-    // Use the token the visible list was built from. Re-deriving it from the
-    // live caret made insertion depend on where the browser leaves the caret
-    // when the tap blurs the textarea: it could land in the wrong token, or
-    // find none and silently do nothing.
-    const range = activeToken;
-    if (!range) return;
-    const next = insertSuggestion(draft.text, range, command.invocation);
+    const live = draftStore(draftKey).getSnapshot().draft;
+    let range: TokenRange;
+    if (fromPointer) {
+      const captured = gesture.current;
+      if (!captured) return;
+      if (captured.key !== discoveryKey) return;
+      if (captured.revision !== live.revision) return;
+      if (captured.invocation !== command.invocation) return;
+      if (live.text.slice(captured.start, captured.end) !== captured.token) return;
+      range = { start: captured.start, end: captured.end };
+    } else {
+      const token = activeToken;
+      if (!token) return;
+      if (draft.revision !== live.revision) return;
+      range = token;
+    }
+    const next = insertSuggestion(live.text, range, command.invocation);
     setDismissedToken(null);
     saved.update({ text: next.text });
+    const insertedRevision = draftStore(draftKey).getSnapshot().draft.revision;
+    const caretOwner = caretMoves.current;
     requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(next.caret, next.caret);
+      const el = textarea.current;
+      // A newer draft revision or a user caret move owns the caret now.
+      if (!el || caretMoves.current !== caretOwner) return;
+      if (draftStore(draftKey).getSnapshot().draft.revision !== insertedRevision) return;
+      if (el.value !== next.text) return;
+      el.focus();
+      el.setSelectionRange(next.caret, next.caret);
       // A programmatic setSelectionRange does not fire the textarea's
       // select event, so the caret state is synced by hand.
       setCaret(next.caret);
@@ -466,7 +521,12 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       </div>
       <ul ref={optionList} id={listId} role="listbox" aria-label="Command suggestions" className="max-h-36 overflow-y-auto p-1">
         {shown.map((command, index) => <li key={command.invocation} role="presentation">
-          <button type="button" id={`${listId}-${index}`} role="option" aria-selected={index === selectedIndex} aria-label={`${command.invocation}${command.description ? `: ${command.description}` : ""}`} onClick={() => chooseCommand(command)} className={`block w-full min-h-11 rounded-lg px-3 py-2 text-left ${index === selectedIndex ? "bg-surface" : ""}`}>
+          <button type="button" id={`${listId}-${index}`} role="option" aria-selected={index === selectedIndex} aria-label={`${command.invocation}${command.description ? `: ${command.description}` : ""}`}
+            onPointerDown={() => {
+              if (!activeToken) return;
+              gesture.current = { key: discoveryKey, revision: draft.revision, start: activeToken.start, end: activeToken.end, token: tokenString ?? "", invocation: command.invocation };
+            }}
+            onClick={() => chooseCommand(command, true)} className={`block w-full min-h-11 rounded-lg px-3 py-2 text-left ${index === selectedIndex ? "bg-surface" : ""}`}>
             <span className="font-medium">{command.invocation}</span>
             {command.origin === "built-in" && <span className="ml-2 text-2xs uppercase tracking-[0.12em] text-subtle">built-in</span>}
             {command.description && <span className="block truncate text-xs text-muted">{command.description}</span>}
@@ -474,7 +534,15 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </li>)}
       </ul>
     </div>}
-      {catalogStatus === "failed" && <p role="status" className="mb-1 px-3 text-xs text-muted">{catalog ? "Could not load skills from the host. Built-in commands still work." : "Could not load commands. Type them anyway."}</p>}
+      {noMatch && <p role="status" className="mb-1 px-3 text-xs text-muted">No matching commands.</p>}
+      {discoveryNote && liveDiscovery && (
+        <p role="status" className="mb-1 flex items-center gap-2 px-3 text-xs text-muted">
+          <span className="min-w-0 flex-1">{discoveryNote}</span>
+          {liveDiscovery.status === "failed" && (
+            <button type="button" className="shrink-0 rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium tap-scale" onClick={() => setRefresh((n) => n + 1)}>Retry</button>
+          )}
+        </p>
+      )}
     </div>
     <div className={`composer-panel shrink-0 rounded-2xl border bg-bg p-2 focus-within:border-accent/70 ${dragging ? "border-accent ring-2 ring-accent/20" : "border-border-strong"}`}>
       {dragging && <p className="p-2 text-sm text-accent">Drop an image here</p>}
@@ -486,7 +554,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       <textarea ref={textarea} rows={1} aria-label={terminal ? "Terminal input" : "Message agent"}
         aria-autocomplete={listVisible ? "list" : undefined} aria-controls={listVisible ? listId : undefined}
         aria-activedescendant={listVisible && selected ? `${listId}-${selectedIndex}` : undefined}
-        value={draft.text} onChange={(e) => { saved.update({ text: e.target.value }); setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length); }} onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} autoCapitalize={terminal ? "off" : "sentences"} autoCorrect={terminal ? "off" : "on"} spellCheck={!terminal}
+        value={draft.text} onChange={(e) => { caretMoves.current += 1; saved.update({ text: e.target.value }); setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length); }} onSelect={(e) => { caretMoves.current += 1; setCaret(e.currentTarget.selectionStart ?? 0); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} autoCapitalize={terminal ? "off" : "sentences"} autoCorrect={terminal ? "off" : "on"} spellCheck={!terminal}
         onKeyDown={(event) => {
           const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
           if (listVisible && !composing) {
@@ -502,7 +570,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
             }
             if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
               event.preventDefault();
-              if (selected) chooseCommand(selected);
+              if (selected) chooseCommand(selected, false);
               return;
             }
             if (event.key === "Escape") {

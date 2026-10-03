@@ -302,23 +302,69 @@ export function herdrInput(raw) {
   return { kind: "text", value: raw };
 }
 
-function run(bin, args) {
+// Read-only herdr wait. An already-aborted signal rejects before any spawn.
+// A later abort rejects the wait and terminates the owned child: SIGTERM
+// now, SIGKILL after a bounded grace if it survives. Callers that pass no
+// signal keep the old behavior exactly.
+export function run(bin, args, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("herdr wait aborted"));
+      return;
+    }
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     const out = [];
     const err = [];
-    child.stdout.on("data", (c) => out.push(c));
-    child.stderr.on("data", (c) => err.push(c));
-    child.on("error", reject);
+    let outBytes = 0;
+    let errBytes = 0;
+    let settled = false;
+    let killTimer;
+    // Scoped reads cap retained output; signal-less callers keep the old
+    // unbounded behavior.
+    const CAP = signal ? 1048576 : Infinity;
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const onAbort = () => {
+      if (settled) return;
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        }, 500);
+        killTimer.unref?.();
+      }
+      settle(reject, new Error("herdr wait aborted"));
+    };
+    child.stdout.on("data", (c) => {
+      if (settled || outBytes >= CAP) return;
+      out.push(c);
+      outBytes += c.length;
+    });
+    child.stderr.on("data", (c) => {
+      if (settled || errBytes >= CAP) return;
+      err.push(c);
+      errBytes += c.length;
+    });
+    child.on("error", (error) => settle(reject, error));
     child.on("close", (code) => {
+      if (settled) return;
       const stdout = Buffer.concat(out).toString("utf8");
       const stderr = Buffer.concat(err).toString("utf8");
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `herdr exited ${code}`));
+        settle(reject, new Error(stderr.trim() || `herdr exited ${code}`));
         return;
       }
-      resolve(stdout);
+      settle(resolve, stdout);
     });
+    if (signal) {
+      if (signal.aborted) return onAbort();
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
 }
 
@@ -699,8 +745,8 @@ function createExecHerdr(bin) {
   // One per bridge process: a consumed answer must not re-open its choose card.
   const observations = createAnswerObservations();
   // The region herdr's own blocked rules key on, which is where the dialog is.
-  const readDetection = (paneId) =>
-    run(bin, ["pane", "read", String(paneId), "--format", "ansi", "--source", "detection"]);
+  const readDetection = (paneId, signal) =>
+    run(bin, ["pane", "read", String(paneId), "--format", "ansi", "--source", "detection"], signal);
   // Companion shells: one per canonical cwd. The pane's label marks them so a
   // restarted bridge re-adopts its shells from the pane list instead of
   // creating duplicates of the same directory. It is set with pane rename:
@@ -711,8 +757,8 @@ function createExecHerdr(bin) {
   let shellLive = new Set();
   const canonical = (dir) => String(dir ?? "").replace(/\/+$/, "");
   const shellHasPane = (paneId) => shellLive.has(paneId) && [...shells.values()].some((shell) => shell.paneId === paneId);
-  async function reconcileShells() {
-    const panes = JSON.parse(await run(bin, ["pane", "list"]))?.result?.panes ?? [];
+  async function reconcileShells(signal) {
+    const panes = JSON.parse(await run(bin, ["pane", "list"], signal))?.result?.panes ?? [];
     shellLive = new Set(panes.map((p) => p.pane_id));
     for (const pane of panes) {
       if (pane.label !== SHELL_LABEL) continue;
@@ -788,8 +834,8 @@ function createExecHerdr(bin) {
     }
     return pane;
   }
-  const resolveProject = createProjectResolver(async (cwd) => {
-    const stdout = await run(bin, ["worktree", "list", "--cwd", cwd]);
+  const resolveProject = createProjectResolver(async (cwd, signal) => {
+    const stdout = await run(bin, ["worktree", "list", "--cwd", cwd], signal);
     return JSON.parse(stdout).result;
   });
   return {
@@ -815,16 +861,38 @@ function createExecHerdr(bin) {
       if (!rect?.width || !rect?.height) throw new Error("no pane rect");
       return { cols: rect.width, rows: rect.height };
     },
-    async snapshot() {
-      const stdout = await run(bin, ["api", "snapshot"]);
+    // A scoped command read passes { freshProjectFor, signal, targeted }:
+    // the target pane's project root is resolved fresh, bypassing the
+    // resolver's 60s cache, and the signal bounds the read-only subprocess
+    // waits. Ordinary polling calls this bare and keeps the cache.
+    async snapshot({ freshProjectFor, signal, targeted = false } = {}) {
+      const stdout = await run(bin, ["api", "snapshot"], signal);
       const parsed = JSON.parse(stdout);
       const raw = parsed.result?.snapshot ?? parsed;
       const agents = await Promise.all((raw.agents ?? []).map(async (rawAgent) => {
         const agent = mapAgent(rawAgent);
-        const git = await resolveProject(agent.cwd);
+        if (targeted) {
+          // Discovery reads only the target's identity and project: no model
+          // enrichment, no unrelated project lookups, no labels or blocked
+          // pane reads.
+          if (agent.id !== freshProjectFor) return agent;
+          const git = await resolveProject(agent.cwd, { fresh: true, signal });
+          return { ...agent, projectRoot: git?.root, branch: git?.branch ?? "" };
+        }
+        const git = await resolveProject(agent.cwd, { fresh: agent.id === freshProjectFor, signal });
         const model = agent.session?.kind === "path" ? await latestModel(agent.session.value, modelCache) : null;
         return { ...agent, projectRoot: git?.root, branch: git?.branch ?? "", model: model ?? undefined };
       }));
+      if (targeted) {
+        return {
+          hostId: "host",
+          at: now(),
+          agents,
+          panes: (raw.agents ?? []).map((a) => ({ id: a.pane_id, agentId: a.pane_id })),
+          shells: [],
+          kinds: [],
+        };
+      }
       // Drop cache rows for sessions this snapshot no longer sees, so a
       // long-lived bridge does not retain a row per session file ever opened.
       if (modelCache.size > agents.length) {
@@ -838,7 +906,7 @@ function createExecHerdr(bin) {
       // read on herdr's side, and the labels have no other source.
       let shellList = [];
       try {
-        shellList = await reconcileShells();
+        shellList = await reconcileShells(signal);
         const byPane = new Map(shellList.map((p) => [p.pane_id, p.label]));
         for (const agent of agents) {
           const paneLabel = byPane.get(agent.paneId);
@@ -858,7 +926,7 @@ function createExecHerdr(bin) {
           .filter((a) => a.status === "blocked")
           .map(async (a) => {
             try {
-              const text = await readDetection(a.id);
+              const text = await readDetection(a.id, signal);
               let found = extractPrompt(text);
               const observed = observations.observe({
                 target: a.id,

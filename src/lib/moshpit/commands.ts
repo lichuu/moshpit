@@ -2,8 +2,8 @@ export type CommandSuggestion = {
   name: string;
   invocation: string;
   description: string;
-  /** "built-in" for the harness's own commands; unset for skills read from the host. */
-  origin?: "built-in";
+  /** "built-in" for the harness's own commands; a bounded source category for skills read from the host. */
+  origin?: string;
 };
 
 export type CommandCoverage = "full" | "partial" | "unsupported";
@@ -94,11 +94,50 @@ export function insertPrefix(
  * built-ins as /model and skills as $name). `prefixes` is longest first, so
  * /skill: is tried before /.
  */
-export type CommandCatalog = {
+export type DisplayCatalog = {
   prefixes: string[];
   commands: CommandSuggestion[];
   coverage: CommandCoverage;
 };
+
+/**
+ * The identity of one scoped discovery request, derived from the bridge
+ * snapshot the user is looking at. `project` is the equality token over the
+ * existing project metadata: it is compared, never sent as a scan selector.
+ */
+export type CommandScope = {
+  target: string;
+  sessionId: string;
+  project: string;
+};
+
+/** A scoped catalog the bridge answered for one exact scope. */
+export type RemoteCatalog = {
+  scope: CommandScope;
+  revision: string;
+  truncated: boolean;
+  warnings: string[];
+  catalog: DisplayCatalog;
+};
+
+/**
+ * The scope a pane can be discovered under, or null when the snapshot has no
+ * usable native identity or cwd: discovery is then unavailable, never
+ * downgraded to a kind-only read.
+ */
+export function commandScope(agent: {
+  id: string;
+  sessionId?: string;
+  cwd: string;
+  projectRoot?: string;
+}): CommandScope | null {
+  if (!agent.sessionId || !agent.cwd) return null;
+  return {
+    target: agent.id,
+    sessionId: agent.sessionId,
+    project: JSON.stringify([agent.projectRoot ?? null, agent.cwd]),
+  };
+}
 
 /**
  * How a harness settles a skill and a built-in with one name. Claude and
@@ -113,9 +152,9 @@ export type CollisionPolicy =
 
 export function mergeCatalog(
   builtins: CommandSuggestion[],
-  remote: { prefix: string; prefixes?: string[]; commands: CommandSuggestion[]; coverage: CommandCoverage } | undefined,
+  remote: DisplayCatalog | undefined,
   policy: CollisionPolicy = { builtinsWin: false },
-): CommandCatalog | undefined {
+): DisplayCatalog | undefined {
   const commands: CommandSuggestion[] = [];
   const seen = new Set<string>();
   const extra: string[] = [];
@@ -137,7 +176,7 @@ export function mergeCatalog(
     [...(remote?.commands ?? []), ...builtins].forEach(add);
   }
   const prefixes = [...new Set([
-    ...(remote?.prefixes ?? (remote?.prefix ? [remote.prefix] : [])),
+    ...(remote?.prefixes ?? []),
     ...(builtins.length ? ["/"] : []),
     ...extra,
   ])].sort((a, b) => b.length - a.length);
@@ -190,59 +229,73 @@ export function filterCommands(
   return commands.filter((command) => command.name.toLowerCase().includes(q));
 }
 
-// Client-boundary validation for GET /api/commands.
 const KNOWN_PREFIXES = ["/", "$", "/skill:"] as const;
+const SCOPE_LIMIT = 4096;
+const REVISION_LIMIT = 128;
+const NAME_LIMIT = 80;
+const INVOCATION_LIMIT = 100;
+const DESCRIPTION_LIMIT = 300;
+const ORIGIN_LIMIT = 32;
+const WARNING_LIMIT = 16;
+const COMMAND_LIMIT = 200;
+const isBoundedString = (value: unknown, limit: number): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= limit;
 
-export function parseCommandsResponse(value: unknown): {
-  kind: string;
-  prefix: "" | "/" | "$" | "/skill:";
-  prefixes: string[];
-  commands: CommandSuggestion[];
-  coverage: CommandCoverage;
-} {
+export function parseScopedCommandsResponse(value: unknown, expected: CommandScope): RemoteCatalog {
   if (!value || typeof value !== "object") throw new Error("invalid commands");
   const body = value as Record<string, unknown>;
-  const prefix = body.prefix;
-  if (prefix !== "" && prefix !== "/" && prefix !== "$" && prefix !== "/skill:")
+  const scope = body.scope;
+  if (!scope || typeof scope !== "object") throw new Error("invalid commands");
+  const s = scope as Record<string, unknown>;
+  if (s.target !== expected.target || s.sessionId !== expected.sessionId || s.project !== expected.project)
     throw new Error("invalid commands");
-  if (!Array.isArray(body.commands)) throw new Error("invalid commands");
-  // A catalog may invoke sources with different prefixes (pi: /skill: skills
-  // beside / templates). An older bridge sends only `prefix`.
-  let prefixes: string[] = prefix ? [prefix] : [];
-  if (body.prefixes !== undefined) {
-    if (!Array.isArray(body.prefixes) || body.prefixes.some((p) => !(KNOWN_PREFIXES as readonly unknown[]).includes(p)))
-      throw new Error("invalid commands");
-    prefixes = [...new Set([...prefixes, ...(body.prefixes as string[])])];
-  }
-  const coverage =
-    body.coverage === "full" || body.coverage === "partial" || body.coverage === "unsupported"
-      ? body.coverage
-      : prefix === ""
-        ? "unsupported"
-        : "full";
+  if (!isBoundedString(s.target, SCOPE_LIMIT) || !isBoundedString(s.sessionId, SCOPE_LIMIT) || !isBoundedString(s.project, SCOPE_LIMIT))
+    throw new Error("invalid commands");
+  if (!isBoundedString(body.revision, REVISION_LIMIT)) throw new Error("invalid commands");
+  if (body.coverage !== "full" && body.coverage !== "partial" && body.coverage !== "unsupported")
+    throw new Error("invalid commands");
+  if (typeof body.truncated !== "boolean") throw new Error("invalid commands");
+  if (!Array.isArray(body.prefixes)) throw new Error("invalid commands");
+  // The unsupported variant is the unavailable state: no prefixes, no
+  // commands. Supported catalogs must advertise at least one prefix.
+  const unsupported = body.coverage === "unsupported";
+  if (unsupported ? body.prefixes.length !== 0 : body.prefixes.length === 0)
+    throw new Error("invalid commands");
+  const prefixes = [...new Set(body.prefixes as string[])];
+  if (prefixes.some((p) => !(KNOWN_PREFIXES as readonly unknown[]).includes(p)))
+    throw new Error("invalid commands");
+  if (!Array.isArray(body.commands) || body.commands.length > COMMAND_LIMIT)
+    throw new Error("invalid commands");
+  if (unsupported && body.commands.length !== 0) throw new Error("invalid commands");
+  const warnings = Array.isArray(body.warnings)
+    ? (body.warnings as unknown[]).filter((w): w is string => typeof w === "string" && w.length <= 64).slice(0, WARNING_LIMIT)
+    : [];
   const commands: CommandSuggestion[] = [];
-  for (const entry of body.commands.slice(0, 200)) {
-    if (!entry || typeof entry !== "object") continue;
+  for (const entry of body.commands) {
+    if (!entry || typeof entry !== "object") throw new Error("invalid commands");
     const command = entry as Record<string, unknown>;
-    const name = typeof command.name === "string" ? command.name.slice(0, 80) : "";
-    if (!name) continue;
-    const invocation =
-      typeof command.invocation === "string" ? command.invocation.slice(0, 100) : "";
-    // A catalog whose invocations do not carry its own prefix would suggest
-    // tokens that agent cannot run; reject the response instead.
-    if (!invocation || (prefix !== "" && !prefixes.some((p) => invocation.startsWith(p))))
+    const name = command.name;
+    const invocation = command.invocation;
+    const description = command.description;
+    const origin = command.origin;
+    if (!isBoundedString(name, NAME_LIMIT) || !isBoundedString(invocation, INVOCATION_LIMIT))
       throw new Error("invalid commands");
-    const description =
-      typeof command.description === "string"
-        ? command.description.slice(0, 300)
-        : "";
-    commands.push({ name, invocation, description });
+    if (/\s/.test(name) || /\s/.test(invocation)) throw new Error("invalid commands");
+    if (typeof description !== "string" || description.length > DESCRIPTION_LIMIT)
+      throw new Error("invalid commands");
+    if (!isBoundedString(origin, ORIGIN_LIMIT)) throw new Error("invalid commands");
+    if (!prefixes.some((p) => invocation.startsWith(p))) throw new Error("invalid commands");
+    commands.push({ name, invocation, description, origin });
   }
   return {
-    kind: typeof body.kind === "string" ? body.kind : "",
-    prefix: prefix,
-    prefixes,
-    commands,
-    coverage: commands.length === 200 && coverage === "full" ? "partial" : coverage,
+    scope: { target: expected.target, sessionId: expected.sessionId, project: expected.project },
+    revision: body.revision as string,
+    truncated: body.truncated,
+    warnings,
+    catalog: {
+      prefixes: prefixes.sort((a, b) => b.length - a.length),
+      commands,
+      coverage: body.coverage as CommandCoverage,
+    },
   };
 }
