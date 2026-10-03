@@ -353,32 +353,69 @@ esac`;
     await page.getByRole("button", { name }).first().click();
   }
 
+  // Moves the caret with real key events so selectionchange updates the
+  // composer's caret state; a programmatic setSelectionRange would not.
+  async function caretTo(prompt: import("@playwright/test").Locator, at: number) {
+    await prompt.press("Home");
+    for (let i = 0; i < at; i += 1) await prompt.press("ArrowRight");
+  }
+
   test("a late response from the previous agent never lands on the new one", async ({
     page,
     bridge,
   }, testInfo) => {
+    const { rm, writeFile } = await import("node:fs/promises");
+    const TRIGGER = "/tmp/moshpit-e2e-commands-late";
+    await rm(TRIGGER, { force: true });
     const host = await bridge({
       home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
-      herdr: twoAgentHerdr(`sleep 0.4; echo '${snapshotBody([CLAUDE_AGENT, CODEX_AGENT])}'`),
-      env: { MOSHPIT_POLL_MS: "60000" },
+      herdr: twoAgentHerdr(
+        `if [ -f ${TRIGGER} ]; then echo '${snapshotBody([CLAUDE_AGENT, CODEX_AGENT])}'; else echo '${snapshotBody([CODEX_AGENT])}'; fi`,
+      ),
+      env: { MOSHPIT_POLL_MS: "300" },
     });
-    // Wide layouts open the first agent's detail as soon as the snapshot
-    // lands, so the initial scoped read can start inside connect; the wait
-    // is armed before connect to catch it either way.
-    const initialRequest = page.waitForRequest((request) => request.url().includes("/api/commands"));
-    await connect(page, host);
-    const listbox = page.getByRole("listbox", { name: "Command suggestions" });
-    const prompt = page.getByPlaceholder("Message this agent…");
+    try {
+      // Hold the claude pane's scoped read in flight across the agent switch,
+      // then release it late: a waiter for a completed request would not
+      // prove the late-completion gate. Boot sees only codex, so no claude
+      // read is in flight while the app loads.
+      let releaseInitial: ((body: string) => void) | null = null;
+      const initial = new Promise<string>((resolve) => (releaseInitial = resolve));
+      let held = false;
+      await page.route("**/api/commands**", (route) => {
+        if (!route.request().url().includes("target=w1%3Ap1")) return route.continue();
+        if (held) return route.continue();
+        held = true;
+        void initial.then((body) => route.fulfill({ status: 200, contentType: "application/json", body }));
+      });
+      await connect(page, host);
+      const listbox = page.getByRole("listbox", { name: "Command suggestions" });
+      const prompt = page.getByPlaceholder("Message this agent…");
 
-    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
-    await prompt.waitFor({ state: "visible", timeout: 20_000 });
-    await initialRequest;
-    await switchTo(page, testInfo, /^codex/);
-    await prompt.waitFor({ state: "visible", timeout: 20_000 });
-    await prompt.fill("/");
-    await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toBeVisible({ timeout: 15_000 });
-    await expect(listbox.getByRole("option", { name: /deploy-thing/ })).toHaveCount(0);
-    await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
+      await writeFile(TRIGGER, "x");
+      const claudeButton = page.getByRole("button", { name: /^claude/ }).first();
+      await expect(claudeButton).toBeVisible({ timeout: 15_000 });
+      await claudeButton.click();
+      await prompt.waitFor({ state: "visible", timeout: 20_000 });
+      await expect.poll(() => held, { timeout: 20_000 }).toBe(true);
+      await switchTo(page, testInfo, /^codex/);
+      await prompt.waitFor({ state: "visible", timeout: 20_000 });
+      releaseInitial!(JSON.stringify({
+        scope: { target: "w1:p1", sessionId: "sess-claude", project: JSON.stringify([null, "/repo/app"]) },
+        revision: "a".repeat(64),
+        coverage: "partial",
+        truncated: false,
+        prefixes: ["/"],
+        commands: [{ name: "deploy-thing", invocation: "/deploy-thing", description: "Ship it.", origin: "home-skills" }],
+        warnings: [],
+      }));
+      await prompt.fill("/");
+      await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toBeVisible({ timeout: 15_000 });
+      await expect(listbox.getByRole("option", { name: /deploy-thing/ })).toHaveCount(0);
+      await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
+    } finally {
+      await rm(TRIGGER, { force: true });
+    }
   });
 
   test("failed discovery shows Retry and keeps manual input usable", async ({
@@ -522,6 +559,194 @@ esac`,
     else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await expect(prompt).toHaveValue(`${ninth.split(":")[0]} `);
     expect(sends).toEqual([]);
+  });
+
+  test("a middle-token insertion restores focus and the caret before the kept arguments", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const sends: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/api\/(submit|action)$/.test(request.url())) sends.push(request.url());
+    });
+    const prompt = page.getByPlaceholder("Message this agent…");
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await prompt.fill("please /mod keep-args");
+    // Caret inside the partial token, before the kept argument.
+    await caretTo(prompt, 11);
+    await expect(page.getByRole("option", { name: /^\/model/ })).toBeVisible({ timeout: 15_000 });
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue("please /model keep-args");
+    await expect
+      .poll(() => prompt.evaluate((el) => (document.activeElement === el ? (el as HTMLTextAreaElement).selectionStart : -1)), { timeout: 5_000 })
+      .toBe("please /model".length);
+    expect(sends).toEqual([]);
+  });
+
+  test("a focused option inserts with Enter and Space without sending", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const sends: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/api\/(submit|action)$/.test(request.url())) sends.push(request.url());
+    });
+    const prompt = page.getByPlaceholder("Message this agent…");
+    const option = page.getByRole("option", { name: /^\/model/ }).first();
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await prompt.fill("/mo");
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    await option.focus();
+    await option.press("Enter");
+    await expect(prompt).toHaveValue("/model ");
+    expect(sends).toEqual([]);
+    await prompt.fill("/mo");
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    await option.focus();
+    await option.press("Space");
+    await expect(prompt).toHaveValue("/model ");
+    expect(sends).toEqual([]);
+  });
+
+  test("a delayed prefix restoration yields to a newer edit and caret move", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const prompt = page.getByPlaceholder("Message this agent…");
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    // Hold the deferred caret-restoration frame so the edit can land first.
+    await page.evaluate(() => {
+      (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames = [];
+      const native = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (fn: FrameRequestCallback) => {
+        if (!String(fn).includes("setSelectionRange")) return native(fn);
+        (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.push(fn);
+        return 900000;
+      };
+    });
+    await prompt.fill("draft");
+    await page.getByRole("button", { name: "Insert slash command", exact: true }).click();
+    await expect(prompt).toHaveValue("draft /");
+    // A newer edit and a user caret move own the caret before the deferred
+    // frame runs; the frame must yield instead of restoring the old caret.
+    await prompt.fill("newer words");
+    await prompt.press("Home");
+    await prompt.press("ArrowRight");
+    await prompt.press("ArrowRight");
+    const frames = await page.evaluate(() => {
+      const held = (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.splice(0);
+      for (const fn of held) fn(performance.now());
+      return held.length;
+    });
+    expect(frames).toBeGreaterThan(0);
+    const caret = await prompt.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
+    expect(caret).toBe(2);
+  });
+
+  test("an edit returning to identical text still owns the caret over a delayed restoration", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const sends: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/api\/(submit|action)$/.test(request.url())) sends.push(request.url());
+    });
+    const prompt = page.getByPlaceholder("Message this agent…");
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    // Hold the deferred caret-restoration frames so the edit can land first.
+    await page.evaluate(() => {
+      (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames = [];
+      const native = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (fn: FrameRequestCallback) => {
+        if (!String(fn).includes("setSelectionRange")) return native(fn);
+        (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.push(fn);
+        return 900000;
+      };
+    });
+    await prompt.fill("please /mod keep-args");
+    await caretTo(prompt, 11);
+    await expect(page.getByRole("option", { name: /^\/model/ })).toBeVisible({ timeout: 15_000 });
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue("please /model keep-args");
+    // An edit that returns to identical text still bumps the draft revision.
+    await prompt.press("End");
+    await prompt.type("x");
+    await prompt.press("Backspace");
+    const frames = await page.evaluate(() => {
+      const held = (window as unknown as { s8Frames: Array<FrameRequestCallback> }).s8Frames.splice(0);
+      for (const fn of held) fn(performance.now());
+      return held.length;
+    });
+    expect(frames).toBeGreaterThan(0);
+    const state = await prompt.evaluate((el) => {
+      const t = el as HTMLTextAreaElement;
+      return {
+        value: t.value,
+        caret: t.selectionStart,
+        focused: document.activeElement === el,
+      };
+    });
+    expect(state.value).toBe("please /model keep-args");
+    expect(state.caret).toBe("please /model keep-args".length);
+    expect(state.focused).toBe(true);
+    expect(sends).toEqual([]);
+  });
+
+  test("IME composition suppresses the list until it ends", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const prompt = page.getByPlaceholder("Message this agent…");
+    const listbox = page.getByRole("listbox", { name: "Command suggestions" });
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await prompt.evaluate((el) => {
+      el.focus();
+      el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    });
+    // The committed text arrives as a real input; only the composition
+    // events are synthetic. The draft holds "/" while composing.
+    await prompt.press("/");
+    await expect(prompt).toHaveValue("/");
+    await expect(listbox).toHaveCount(0);
+    await prompt.evaluate((el) => {
+      el.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    });
+    await expect(listbox).toBeVisible({ timeout: 15_000 });
   });
 
   test("an unsupported kind shows the unavailable state, not a failure", async ({

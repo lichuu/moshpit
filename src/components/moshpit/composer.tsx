@@ -227,6 +227,11 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   // lands after any of them moved is stale and must not write the draft.
   const gesture = useRef<{ key: string; revision: number; start: number; end: number; token: string; invocation: string } | null>(null);
   const caretMoves = useRef(0);
+  // The text our own insertion just wrote. The controlled update moves the
+  // DOM selection to the end of that text and fires select; that
+  // notification is ours, not user ownership, so it must not cancel the
+  // caret restoration that follows.
+  const ownedEdit = useRef<{ text: string } | null>(null);
   const noMatch = Boolean(activeToken && catalog && matches.length === 0 && (dismissedToken === null || dismissedToken !== tokenString));
   const discoveryNote = (() => {
     if (!liveDiscovery) return null;
@@ -335,6 +340,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     }
     const next = insertSuggestion(live.text, range, command.invocation);
     setDismissedToken(null);
+    ownedEdit.current = { text: next.text };
     saved.update({ text: next.text });
     const insertedRevision = draftStore(draftKey).getSnapshot().draft.revision;
     const caretOwner = caretMoves.current;
@@ -355,12 +361,21 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     if (!buttonPrefix || busy) return;
     const input = textarea.current;
     if (!input) return;
-    const next = insertPrefix(draft.text, input.selectionStart ?? 0, input.selectionEnd ?? 0, buttonPrefix);
+    const live = draftStore(draftKey).getSnapshot().draft;
+    const next = insertPrefix(live.text, input.selectionStart ?? 0, input.selectionEnd ?? 0, buttonPrefix);
     setDismissedToken(null);
+    ownedEdit.current = { text: next.text };
     saved.update({ text: next.text });
+    const insertedRevision = draftStore(draftKey).getSnapshot().draft.revision;
+    const caretOwner = caretMoves.current;
     requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(next.caret, next.caret);
+      const el = textarea.current;
+      // A newer draft revision or a user caret move owns the caret now.
+      if (!el || caretMoves.current !== caretOwner) return;
+      if (draftStore(draftKey).getSnapshot().draft.revision !== insertedRevision) return;
+      if (el.value !== next.text) return;
+      el.focus();
+      el.setSelectionRange(next.caret, next.caret);
       setCaret(next.caret);
     });
   }
@@ -526,7 +541,10 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
               if (!activeToken) return;
               gesture.current = { key: discoveryKey, revision: draft.revision, start: activeToken.start, end: activeToken.end, token: tokenString ?? "", invocation: command.invocation };
             }}
-            onClick={() => chooseCommand(command, true)} className={`block w-full min-h-11 rounded-lg px-3 py-2 text-left ${index === selectedIndex ? "bg-surface" : ""}`}>
+            // A pointer click carries detail >= 1; Enter or Space on the
+            // focused button fires click with detail 0, which takes the live
+            // token/revision path instead of the pointerdown capture.
+            onClick={(e) => chooseCommand(command, e.detail !== 0)} className={`block w-full min-h-11 rounded-lg px-3 py-2 text-left ${index === selectedIndex ? "bg-surface" : ""}`}>
             <span className="font-medium">{command.invocation}</span>
             {command.origin === "built-in" && <span className="ml-2 text-2xs uppercase tracking-[0.12em] text-subtle">built-in</span>}
             {command.description && <span className="block truncate text-xs text-muted">{command.description}</span>}
@@ -554,7 +572,18 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       <textarea ref={textarea} rows={1} aria-label={terminal ? "Terminal input" : "Message agent"}
         aria-autocomplete={listVisible ? "list" : undefined} aria-controls={listVisible ? listId : undefined}
         aria-activedescendant={listVisible && selected ? `${listId}-${selectedIndex}` : undefined}
-        value={draft.text} onChange={(e) => { caretMoves.current += 1; saved.update({ text: e.target.value }); setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length); }} onSelect={(e) => { caretMoves.current += 1; setCaret(e.currentTarget.selectionStart ?? 0); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} autoCapitalize={terminal ? "off" : "sentences"} autoCorrect={terminal ? "off" : "on"} spellCheck={!terminal}
+        value={draft.text} onChange={(e) => { caretMoves.current += 1; saved.update({ text: e.target.value }); setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length); }} onSelect={(e) => {
+          const el = e.currentTarget;
+          const start = el.selectionStart ?? 0;
+          const owned = ownedEdit.current;
+          if (owned && el.value === owned.text && start === owned.text.length) {
+            ownedEdit.current = null;
+            setCaret(start);
+            return;
+          }
+          caretMoves.current += 1;
+          setCaret(start);
+        }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} autoCapitalize={terminal ? "off" : "sentences"} autoCorrect={terminal ? "off" : "on"} spellCheck={!terminal}
         onKeyDown={(event) => {
           const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
           if (listVisible && !composing) {
