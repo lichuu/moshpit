@@ -198,9 +198,13 @@ if (cmd === "api" && sub === "snapshot") {
   writeFileSync(counter, String(n));
   if (process.env.FAKE_HERDR_HANG === String(n)) {
     process.on("SIGTERM", () => {
-      writeFileSync(process.env.FAKE_HERDR_KILLED, "killed");
-      process.exit(143);
+      const delay = Number(process.env.FAKE_HERDR_ACK_DELAY ?? 0);
+      setTimeout(() => {
+        writeFileSync(process.env.FAKE_HERDR_KILLED, "killed");
+        process.exit(143);
+      }, delay);
     });
+    writeFileSync(process.env.FAKE_HERDR_READY, String(process.pid));
     setInterval(() => {}, 1000);
   } else {
     process.stdout.write(JSON.stringify({ result: { snapshot: { agents: [{
@@ -214,7 +218,7 @@ if (cmd === "api" && sub === "snapshot") {
 }
 `;
 
-async function fakeHerdr(hang) {
+async function fakeHerdr(hang, { ackDelay = 0 } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "moshpit-fake-herdr-"));
   const bin = path.join(dir, "herdr");
   await writeFile(bin, `#!${process.execPath}\n${FAKE_HERDR}`);
@@ -223,22 +227,67 @@ async function fakeHerdr(hang) {
   const env = {
     FAKE_HERDR_COUNTER: path.join(dir, "counter"),
     FAKE_HERDR_KILLED: path.join(dir, "killed"),
+    FAKE_HERDR_READY: path.join(dir, "ready"),
     FAKE_HERDR_HANG: hang,
+    FAKE_HERDR_ACK_DELAY: String(ackDelay),
   };
   for (const [key, value] of Object.entries(env)) {
     saved[key] = process.env[key];
     process.env[key] = value;
   }
   const herdr = createHerdr({ bin });
+  const readyFile = path.join(dir, "ready");
+  const killedFile = path.join(dir, "killed");
+  const readPid = async () => Number(await readFile(readyFile, "utf8").catch(() => "")) || 0;
+  const isAlive = (pid) => {
+    if (!pid) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   return {
-    dir,
     herdr,
-    killed: path.join(dir, "killed"),
-    restore: () => {
+    // The ready PID is published only after the SIGTERM handler is
+    // installed; 0 means the child never armed before the bound.
+    async waitReady(boundMs = 2000) {
+      const deadline = Date.now() + boundMs;
+      for (;;) {
+        const pid = await readPid();
+        if (pid) return pid;
+        if (Date.now() > deadline) return 0;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    // Bounded wait for the termination ACK and the owned PID's
+    // disappearance; a child still alive at the bound fails outright.
+    async waitTerminated(boundMs = 2000) {
+      const deadline = Date.now() + boundMs;
+      for (;;) {
+        const pid = await readPid();
+        const ack = (await readFile(killedFile, "utf8").catch(() => "")) === "killed";
+        if (ack && !isAlive(pid)) return { ready: Boolean(pid || ack), ack: true, alive: false };
+        if (Date.now() > deadline) {
+          if (isAlive(pid)) throw new Error("the owned herdr child survived the termination bound");
+          return { ready: Boolean(pid), ack: false, alive: null };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    async cleanup() {
+      const pid = await readPid();
+      if (isAlive(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch { /* already gone */ }
+      }
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+      await rm(dir, { recursive: true, force: true });
     },
   };
 }
@@ -256,11 +305,18 @@ test("a hung pre-scan snapshot stops the scoped request; the child is killed", {
       }),
       (error) => error instanceof ScanStoppedError && error.reason === "aborted",
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(await readFile(fake.killed, "utf8").catch(() => ""), "killed", "the owned herdr child was terminated");
+    const outcome = await fake.waitTerminated(2000);
+    if (outcome.ready || outcome.ack) {
+      assert.equal(outcome.ack, true, "the owned herdr child acknowledged the SIGTERM");
+      assert.equal(outcome.alive, false, "the owned herdr child is gone");
+    } else {
+      // The child died from the default SIGTERM before publishing its
+      // ready PID: no ACK is possible, so the stop stands on the
+      // rejection above, not on a kill claim.
+      assert.equal(outcome.alive, null, "no ready PID was published");
+    }
   } finally {
-    fake.restore();
-    await rm(fake.dir, { recursive: true, force: true });
+    await fake.cleanup();
   }
 });
 
@@ -279,11 +335,15 @@ test("a hung post-scan snapshot publishes nothing", { timeout: 10000 }, async ()
       }),
       (error) => error instanceof ScanStoppedError && error.reason === "aborted",
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(await readFile(fake.killed, "utf8").catch(() => ""), "killed", "the owned herdr child was terminated");
+    const outcome = await fake.waitTerminated(2000);
+    if (outcome.ready || outcome.ack) {
+      assert.equal(outcome.ack, true, "the owned herdr child acknowledged the SIGTERM");
+      assert.equal(outcome.alive, false, "the owned herdr child is gone");
+    } else {
+      assert.equal(outcome.alive, null, "no ready PID was published");
+    }
   } finally {
-    fake.restore();
-    await rm(fake.dir, { recursive: true, force: true });
+    await fake.cleanup();
     await rm(home, { recursive: true, force: true });
   }
 });
@@ -298,14 +358,40 @@ test("an abort during a snapshot wait kills the child and rejects", { timeout: 1
       sessionId: "sess-1",
       signal: controller.signal,
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the handler-ready PID instead of guessing at readiness:
+    // the abort below must land on an armed child.
+    const pid = await fake.waitReady(2000);
     controller.abort();
     await assert.rejects(pending, (error) => error instanceof ScanStoppedError && error.reason === "aborted");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(await readFile(fake.killed, "utf8").catch(() => ""), "killed", "the owned herdr child was terminated");
+    assert.ok(pid, "the child armed its SIGTERM handler before the abort");
+    const outcome = await fake.waitTerminated(2000);
+    assert.equal(outcome.ack, true, "the owned herdr child acknowledged the SIGTERM");
+    assert.equal(outcome.alive, false, "the owned herdr child is gone");
   } finally {
-    fake.restore();
-    await rm(fake.dir, { recursive: true, force: true });
+    await fake.cleanup();
+  }
+});
+
+test("a termination ACK delayed past the old 50 ms guess is still owned", { timeout: 10000 }, async () => {
+  const fake = await fakeHerdr("1", { ackDelay: 150 });
+  try {
+    await assert.rejects(
+      scopedCatalog({
+        snapshot: (options) => fake.herdr.snapshot(options),
+        target: "w1:p1",
+        sessionId: "sess-1",
+        signal: AbortSignal.timeout(400),
+        deadlineMs: 400,
+      }),
+      (error) => error instanceof ScanStoppedError && error.reason === "aborted",
+    );
+    // The ACK lands ~150 ms after the SIGTERM, past the fixed 50 ms the
+    // old check assumed; the bounded wait owns it instead.
+    const outcome = await fake.waitTerminated(2000);
+    assert.equal(outcome.ack, true, "the delayed ACK landed within the owned bound");
+    assert.equal(outcome.alive, false, "the owned herdr child is gone");
+  } finally {
+    await fake.cleanup();
   }
 });
 
