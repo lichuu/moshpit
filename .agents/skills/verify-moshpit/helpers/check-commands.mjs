@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import { detectToken, filterCommands, insertPrefix, insertSuggestion, parseCommandsResponse } from "../../../../src/lib/moshpit/commands.ts";
-
-// fetchCommands is verified through the real HTTP boundary: the same
-// request + client-boundary parse the composer uses, with the AbortSignal
-// the catalog effect passes for disposing a pending fetch.
+import { detectToken, filterCommands, insertPrefix, insertSuggestion, parseScopedCommandsResponse, commandScope } from "../../../../src/lib/moshpit/commands.ts";
+import { scanAgentCommands } from "../../../../bridge/commands.mjs";
 
 // Trigger detection is bound to the agent's own prefix. A token in another
 // agent's syntax (a / or $ token on a /skill: catalog, and vice versa)
@@ -88,60 +84,83 @@ for (const [text, caret, want, at] of [
 const commands = [{ name: "Review", invocation: "/Review", description: "Review the diff." }, { name: "deploy", invocation: "$deploy", description: "" }];
 assert.deepEqual(filterCommands(commands, "rev").map((c) => c.name), ["Review"]);
 assert.deepEqual(filterCommands(commands, "x"), []);
-const parsed = parseCommandsResponse({ kind: "pi", prefix: "/skill:", coverage: "full", commands: [{ name: "a", invocation: "/skill:a", description: "d" }, { name: "b", invocation: "/skill:b" }] });
-assert.deepEqual(parsed, { kind: "pi", prefix: "/skill:", prefixes: ["/skill:"], coverage: "full", commands: [{ name: "a", invocation: "/skill:a", description: "d" }, { name: "b", invocation: "/skill:b", description: "" }] });
-// A catalog advertising several prefixes (pi: /skill: skills beside /
-// templates) accepts invocations under any of them, and no others.
-const mixed = parseCommandsResponse({ kind: "pi", prefix: "/skill:", prefixes: ["/skill:", "/"], coverage: "partial", commands: [{ name: "a", invocation: "/skill:a" }, { name: "review", invocation: "/review" }] });
-assert.deepEqual(mixed.prefixes, ["/skill:", "/"]);
-assert.deepEqual(mixed.commands.map((c) => c.invocation), ["/skill:a", "/review"]);
-assert.throws(() => parseCommandsResponse({ prefix: "/skill:", prefixes: ["/skill:", "/"], commands: [{ name: "d", invocation: "$d" }] }));
-assert.throws(() => parseCommandsResponse({ prefix: "/", prefixes: ["%"], commands: [] }), "an unknown advertised prefix is rejected");
-assert.throws(() => parseCommandsResponse(null));
-assert.throws(() => parseCommandsResponse({ prefix: "%", commands: [] }));
-assert.throws(() => parseCommandsResponse({ prefix: "/", commands: "nope" }));
-// An invocation that does not carry the catalog's prefix is rejected:
-// the client must not suggest tokens the agent cannot run.
-assert.throws(() => parseCommandsResponse({ prefix: "/skill:", commands: [{ name: "a", invocation: "/a" }] }));
-assert.throws(() => parseCommandsResponse({ prefix: "/", commands: [{ name: "a" }] }));
-assert.throws(() => parseCommandsResponse({ prefix: "$", commands: [{ name: "a", invocation: "/a" }] }));
-const trimmed = parseCommandsResponse({ kind: "pi", prefix: "/skill:", coverage: "full", commands: [{ name: "n".repeat(999), invocation: "/skill:" + "i".repeat(999), description: "d".repeat(999) }] });
-assert.equal(trimmed.commands[0].name.length, 80);
-assert.equal(trimmed.commands[0].invocation.length, 100);
-assert.equal(trimmed.commands[0].description.length, 300);
-const capped = parseCommandsResponse({ kind: "pi", prefix: "/skill:", coverage: "full", commands: Array.from({ length: 250 }, (_, i) => ({ name: `c${i}`, invocation: `/skill:c${i}` })) });
-assert.equal(capped.commands.length, 200);
-assert.equal(capped.coverage, "partial");
 
-// Stale/disposed fetches: an aborted in-flight catalog read rejects, and a
-// later fetch (the new host/kind) still resolves on the same server.
-const server = http.createServer((req, res) => {
-  setTimeout(() => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ kind: "pi", prefix: "/skill:", commands: [{ name: "ask", invocation: "/skill:ask", description: "Ask the user." }] }));
-  }, 150);
+const scope = { target: "w1:p1", sessionId: "sess-1", project: JSON.stringify([null, "/repo/app"]) };
+const wire = (over = {}) => ({
+  scope,
+  revision: "a".repeat(64),
+  coverage: "partial",
+  truncated: false,
+  prefixes: ["/skill:", "/"],
+  commands: [
+    { name: "ask", invocation: "/skill:ask", description: "Ask the user.", origin: "home-skills" },
+    { name: "review", invocation: "/review", description: "", origin: "home-templates" },
+  ],
+  warnings: [],
+  ...over,
 });
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const url = `http://127.0.0.1:${server.address().port}`;
-const fetchCatalog = (signal) =>
-  (async () => {
-    const res = await fetch(`${url}/api/commands?agent=pi`, { cache: "no-store", signal });
-    if (!res.ok) throw new Error(`commands ${res.status}`);
-    return parseCommandsResponse(await res.json());
-  })();
-{
-  const controller = new AbortController();
-  const pending = fetchCatalog(controller.signal);
-  const rejected = pending.then(
-    () => false,
-    (error) => /abort/i.test(`${error.name} ${error.message}`),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  controller.abort(); // the host/kind switch disposes the pending fetch
-  assert.equal(await rejected, true, "aborted fetch rejects with an abort error");
-  const fresh = await fetchCatalog();
-  assert.equal(fresh.prefix, "/skill:", "a new fetch resolves after the stale one was disposed");
-}
-server.close();
+const parsed = parseScopedCommandsResponse(wire(), scope);
+assert.deepEqual(parsed.scope, scope);
+assert.deepEqual(parsed.catalog.prefixes, ["/skill:", "/"]);
+assert.deepEqual(parsed.catalog.commands.map((c) => [c.invocation, c.origin]), [
+  ["/skill:ask", "home-skills"],
+  ["/review", "home-templates"],
+]);
+assert.equal(parsed.catalog.coverage, "partial");
+assert.equal(parsed.truncated, false);
+const scopedThrows = (value) => {
+  try {
+    parseScopedCommandsResponse(value, scope);
+    return false;
+  } catch {
+    return true;
+  }
+};
+assert.equal(scopedThrows(wire({ scope: { ...scope, target: "w9:p9" } })), true, "a foreign target is refused");
+assert.equal(scopedThrows(wire({ scope: { ...scope, sessionId: "other" } })), true, "a foreign session is refused");
+assert.equal(scopedThrows(wire({ scope: { ...scope, project: JSON.stringify([null, "/repo/other"]) } })), true, "a foreign project is refused");
+assert.equal(scopedThrows(wire({ revision: "" })), true, "a missing revision is refused");
+assert.equal(scopedThrows(wire({ coverage: "maybe" })), true, "an unknown coverage is refused");
+assert.equal(scopedThrows(wire({ prefixes: ["%"] })), true, "an unknown advertised prefix is refused");
+assert.equal(
+  scopedThrows(wire({ commands: [{ name: "a", invocation: "/" + "i".repeat(101), description: "", origin: "home-skills" }] })),
+  true,
+  "an overlong invocation is refused, not clipped",
+);
+assert.equal(
+  scopedThrows(wire({ commands: [{ name: "a", invocation: "/a b", description: "", origin: "home-skills" }] })),
+  true,
+  "a whitespace invocation is refused",
+);
+assert.equal(scopedThrows(wire({ commands: [{ name: "a", invocation: "$a", description: "", origin: "home-skills" }] })), true, "an invocation outside the advertised prefixes is refused");
+assert.equal(scopedThrows(wire({ commands: [{ name: "a", invocation: "/a", description: "" }] })), true, "a missing origin is refused");
+// The scanner's unsupported variant (empty prefixes, empty commands) must
+// parse as the unavailable state, not a failure.
+const unsupported = await scanAgentCommands({ kind: "moshpit-unknown-kind", home: "/nonexistent-moshpit-home" });
+assert.equal(unsupported.coverage, "unsupported");
+assert.deepEqual(unsupported.prefixes, []);
+assert.deepEqual(unsupported.commands, []);
+const unsupportedWire = {
+  scope,
+  revision: unsupported.revision,
+  coverage: unsupported.coverage,
+  truncated: unsupported.truncated,
+  prefixes: unsupported.prefixes,
+  commands: unsupported.commands,
+  warnings: unsupported.warnings,
+};
+const parsedUnsupported = parseScopedCommandsResponse(unsupportedWire, scope);
+assert.deepEqual(parsedUnsupported.catalog, { prefixes: [], commands: [], coverage: "unsupported" });
+assert.equal(scopedThrows(wire({ coverage: "unsupported", prefixes: [], commands: [{ name: "a", invocation: "/a", description: "", origin: "home-skills" }] })), true, "an unsupported catalog with commands is refused");
+assert.equal(scopedThrows(wire({ coverage: "partial", prefixes: [] })), true, "a supported catalog without prefixes is refused");
+assert.deepEqual(commandScope({ id: "w1:p1", sessionId: "sess-1", cwd: "/repo/app", projectRoot: "/repo" }), {
+  target: "w1:p1",
+  sessionId: "sess-1",
+  project: JSON.stringify(["/repo", "/repo/app"]),
+});
+assert.equal(commandScope({ id: "w1:p1", cwd: "/repo/app" }), null);
+assert.equal(commandScope({ id: "w1:p1", sessionId: "sess-1", cwd: "" }), null);
 
-console.log("ok   prefix-bound token detection, prefix-tap caret, real /skill: invocations, disposed fetches");
+console.log("ok   prefix-bound token detection, prefix-tap caret, real /skill: invocations");
+console.log("ok   scoped catalog validation: exact scope, bounded metadata, no clipping, unavailable scopes");
+console.log("ok   scanner-to-parser round trip: the unsupported variant parses as unavailable");
