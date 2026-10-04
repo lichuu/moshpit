@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect, agentAction } from "../fixtures";
 
 async function openTerminal(page: import("@playwright/test").Page, agent = "migrate") {
@@ -163,6 +164,25 @@ test.describe("terminal scroll", () => {
     await key.click();
     await expect(pane.getByText("[esc]")).toHaveCount(2);
     expect(await pane.evaluate((el) => el.scrollTop)).toBe(0);
+  });
+});
+
+test.describe("compact terminal composer", () => {
+  test("an attached image leaves the input its full row", async ({ demo }) => {
+    await openTerminal(demo);
+    await demo.setViewportSize({ width: 390, height: 450 });
+    await expect(demo.locator("html")).toHaveAttribute("data-compact", "true");
+
+    const input = demo.getByRole("textbox", { name: "Terminal input" });
+    const width = async () => (await input.boundingBox())?.width ?? 0;
+    const bare = await width();
+    await demo.locator('input[type="file"][accept="image/*"]').setInputFiles({
+      name: "Screenshot 2026-01-01 at 10.00.00.png",
+      mimeType: "image/png",
+      buffer: readFileSync(new URL("../fixtures/tiny.png", import.meta.url)),
+    });
+    await expect(demo.getByRole("button", { name: "Remove image" })).toBeVisible();
+    expect(await width()).toBe(bare);
   });
 });
 
