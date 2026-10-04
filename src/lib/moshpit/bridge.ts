@@ -3,7 +3,7 @@ import type { Agent, AgentDetail, Attachment, Host, PairPush, PushSetup, Shell }
 import { BRIDGE_PROBE_MS } from "./types";
 import { breadcrumb } from "./blackbox";
 import { accessError, credentials, identityHeaders, requireReady, saveCredentials, setHostAccess } from "./access";
-import { parseCommandsResponse } from "./commands";
+import { parseScopedCommandsResponse, type CommandScope, type RemoteCatalog } from "./commands";
 
 export { BRIDGE_PROBE_MS };
 
@@ -225,17 +225,15 @@ export async function postLogin(
 
 export async function fetchCommands(
   url: string,
-  kind: string,
+  scope: CommandScope,
   signal?: AbortSignal,
-  /** A pane to ask for its live list (pi only); omit for the disk catalog. */
-  target?: string,
-): Promise<ReturnType<typeof parseCommandsResponse>> {
+): Promise<RemoteCatalog> {
   const res = await fetch(
-    `${url}/api/commands?agent=${encodeURIComponent(kind)}${target ? `&target=${encodeURIComponent(target)}` : ""}`,
+    `${url}/api/commands?target=${encodeURIComponent(scope.target)}&sessionId=${encodeURIComponent(scope.sessionId)}`,
     { headers: headers(url), redirect: "error", cache: "no-store", signal },
   );
-  if (!res.ok) throw await accessError(res, url, "commands");
-  return parseCommandsResponse(await res.json());
+  if (!res.ok) throw await accessError(res, url, "commands", signal);
+  return parseScopedCommandsResponse(await res.json(), scope);
 }
 
 export async function fetchAgentDetail(

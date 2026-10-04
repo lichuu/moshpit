@@ -80,6 +80,69 @@ test("protocol-2 discovery, credentials, errors and ticket requests", async ({ p
   expect(result.discoveryHeaders).toEqual({});
 });
 
+test("fetchCommands sends the scoped request, parses at the boundary, and refuses redirects", async ({ page }) => {
+  await page.goto(`${DEV_URL}/`);
+  const scope = { target: "w1:p1", sessionId: "sess-1", project: JSON.stringify([null, "/repo"]) };
+  const wire = {
+    scope,
+    revision: "a".repeat(64),
+    coverage: "partial",
+    truncated: false,
+    prefixes: ["/"],
+    commands: [{ name: "deploy", invocation: "/deploy", description: "Ship it.", origin: "home-skills" }],
+    warnings: [],
+  };
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  page.route("**/api/commands*", async (route) => {
+    const index = seen.length;
+    seen.push({ url: route.request().url(), headers: route.request().headers() });
+    if (index === 1) await new Promise((resolve) => setTimeout(resolve, 500));
+    if (index === 2) return route.fulfill({ status: 302, headers: { location: "https://other.example/" } });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(wire) });
+  });
+  const result = await page.evaluate(async (scope) => {
+    const accessPath = "/src/lib/moshpit/access.ts";
+    const bridgePath = "/src/lib/moshpit/bridge.ts";
+    const a = await import(accessPath);
+    const b = await import(bridgePath);
+    const origin = "https://commands.example";
+    a.saveCredentials(origin, { sessionToken: "token", deviceId: "device", deviceSecret: "s".repeat(43) });
+    a.setHostAccess(origin, { status: "ready" });
+    const ok = await b.fetchCommands(origin, scope);
+    const controller = new AbortController();
+    const pending = b.fetchCommands(origin, scope, controller.signal);
+    const aborted = pending.then(
+      () => false,
+      (error: Error) => /abort/i.test(`${error.name} ${error.message}`),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    const abortRejected = await aborted;
+    const redirect = await b.fetchCommands(origin, scope).then(
+      () => "landed",
+      (error: Error) => error.message,
+    );
+    return {
+      scope: ok.scope,
+      prefixes: ok.catalog.prefixes,
+      commands: ok.catalog.commands.map((c: { invocation: string }) => c.invocation),
+      coverage: ok.catalog.coverage,
+      abortRejected,
+      redirect,
+    };
+  }, scope);
+  expect(result.scope).toEqual(scope);
+  expect(result.prefixes).toEqual(["/"]);
+  expect(result.commands).toEqual(["/deploy"]);
+  expect(result.coverage).toBe("partial");
+  expect(result.abortRejected).toBe(true);
+  expect(result.redirect).not.toBe("landed");
+  expect(seen).toHaveLength(3);
+  expect(seen[0].url).toBe("https://commands.example/api/commands?target=w1%3Ap1&sessionId=sess-1");
+  expect(seen[0].headers.authorization).toBe("Bearer token");
+  expect(seen[0].headers["x-moshpit-device"]).toBe(`device.${"s".repeat(43)}`);
+});
+
 test("a host with push turned off says so and the browser is not subscribed", async ({ page }) => {
   await page.goto(`${DEV_URL}/`);
   const result = await page.evaluate(async () => {
@@ -183,7 +246,7 @@ test("every request that carries credentials refuses to follow a redirect", asyn
     await settle(b.listDevices(origin));
     await settle(b.setDeviceExpiry(origin, "device", "30d"));
     await settle(b.terminalTicket(origin, "pane"));
-    await settle(b.fetchCommands(origin, "codex"));
+    await settle(b.fetchCommands(origin, { target: "pane", sessionId: "sess-1", project: JSON.stringify([null, "/repo"]) }));
     await settle(b.fetchAgentDetail(origin, "pane", new AbortController().signal));
     await settle(b.updatePushSubscription(origin, { action: "clear" }));
     await settle(b.postAction(origin, { kind: "keys", target: "pane", keys: "enter" }));

@@ -436,21 +436,21 @@ test.describe("command catalog", () => {
 
       // Codex: $ skills beside / built-ins.
       const codex = mergeCatalog(builtinCommands("codex"), {
-        prefix: "$", coverage: "full", commands: [skill("$", "deploy")],
+        prefixes: ["$"], coverage: "full", commands: [skill("$", "deploy")],
       })!;
       const dollar = detectCommandToken("run $dep", 8, codex.prefixes);
       const slash = detectCommandToken("/mo", 3, codex.prefixes);
 
       // Claude: a skill named like a built-in wins, and there is one row for it.
       const claude = mergeCatalog(builtinCommands("claude"), {
-        prefix: "/", coverage: "full", commands: [{ ...skill("/", "review"), description: "my review" }],
+        prefixes: ["/"], coverage: "full", commands: [{ ...skill("/", "review"), description: "my review" }],
       })!;
       const reviews = claude.commands.filter((c: { invocation: string }) => c.invocation === "/review");
 
       // Pi: built-ins and / templates beside /skill: skills. A template named
       // like a built-in is shadowed, as in pi.
       const pi = mergeCatalog(builtinCommands("pi"), {
-        prefix: "/skill:", prefixes: ["/skill:", "/"], coverage: "partial",
+        prefixes: ["/skill:", "/"], coverage: "partial",
         commands: [skill("/skill:", "notes"), skill("/", "fix-tests"), { ...skill("/", "model"), description: "mine" }],
       }, collisionPolicy("pi"))!;
       const piSkillToken = detectCommandToken("/skill:no", 9, pi.prefixes);
@@ -458,7 +458,7 @@ test.describe("command catalog", () => {
       // Grok: the built-in keeps /compact and a same-named skill moves to
       // /user:compact, still reachable.
       const grok = mergeCatalog(builtinCommands("grok"), {
-        prefix: "/", coverage: "partial", commands: [skill("/", "compact"), skill("/", "commit")],
+        prefixes: ["/"], coverage: "partial", commands: [skill("/", "compact"), skill("/", "commit")],
       }, collisionPolicy("grok"))!;
 
       return {
@@ -507,6 +507,82 @@ test.describe("command catalog", () => {
     expect(result.grok.compact).toEqual([["/compact", "built-in"], ["/user:compact", "skill"]]);
     expect(result.grok.commit).toBe(true);
     expect(result.shell).toBeNull();
+  });
+
+  test("scoped catalogs validate exact scope, bounded metadata and no clipping", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+
+    const result = await page.evaluate(async ([commandsMod]) => {
+      const { parseScopedCommandsResponse, commandScope } = await import(commandsMod);
+      const scope = { target: "w1:p1", sessionId: "sess-1", project: JSON.stringify([null, "/repo/app"]) };
+      const wire = (over: Record<string, unknown> = {}) => ({
+        scope,
+        revision: "a".repeat(64),
+        coverage: "partial",
+        truncated: false,
+        prefixes: ["/"],
+        commands: [{ name: "deploy", invocation: "/deploy", description: "Ship it.", origin: "home-skills" }],
+        warnings: [],
+        ...over,
+      });
+      const ok = parseScopedCommandsResponse(wire(), scope);
+      const throws = (value: unknown) => {
+        try {
+          parseScopedCommandsResponse(value, scope);
+          return false;
+        } catch {
+          return true;
+        }
+      };
+      return {
+        scope: ok.scope,
+        revision: ok.revision,
+        truncated: ok.truncated,
+        warnings: ok.warnings,
+        catalog: ok.catalog,
+        wrongTarget: throws(wire({ scope: { ...scope, target: "w9:p9" } })),
+        wrongSession: throws(wire({ scope: { ...scope, sessionId: "other" } })),
+        wrongProject: throws(wire({ scope: { ...scope, project: JSON.stringify([null, "/repo/other"]) } })),
+        missingScope: throws(wire({ scope: undefined })),
+        missingRevision: throws(wire({ revision: "" })),
+        badCoverage: throws(wire({ coverage: "maybe" })),
+        badTruncated: throws(wire({ truncated: "yes" })),
+        badPrefix: throws(wire({ prefixes: ["%"] })),
+        noPrefixes: throws(wire({ prefixes: [] })),
+        unsupportedWithCommands: throws(wire({ coverage: "unsupported", prefixes: [], commands: [{ name: "d", invocation: "/d", description: "", origin: "home-skills" }] })),
+        overlongInvocation: throws(wire({ commands: [{ name: "d", invocation: "/" + "i".repeat(101), description: "", origin: "home-skills" }] })),
+        whitespaceInvocation: throws(wire({ commands: [{ name: "d", invocation: "/d e", description: "", origin: "home-skills" }] })),
+        foreignInvocation: throws(wire({ commands: [{ name: "d", invocation: "$d", description: "", origin: "home-skills" }] })),
+        missingOrigin: throws(wire({ commands: [{ name: "d", invocation: "/d", description: "" }] })),
+        tooMany: throws(wire({ commands: Array.from({ length: 201 }, (_, i) => ({ name: `c${i}`, invocation: `/c${i}`, description: "", origin: "home-skills" })) })),
+        longWarningsTrimmed: parseScopedCommandsResponse(wire({ warnings: Array.from({ length: 40 }, (_, i) => `w${i}`) }), scope).warnings.length,
+        unsupported: parseScopedCommandsResponse(wire({ coverage: "unsupported", prefixes: [], commands: [] }), scope).catalog,
+        scopeFromAgent: commandScope({ id: "w1:p1", sessionId: "sess-1", cwd: "/repo/app", projectRoot: "/repo" }),
+        noSession: commandScope({ id: "w1:p1", cwd: "/repo/app" }),
+        noCwd: commandScope({ id: "w1:p1", sessionId: "sess-1", cwd: "" }),
+      };
+    }, [COMMANDS]);
+
+    expect(result.scope).toEqual({ target: "w1:p1", sessionId: "sess-1", project: JSON.stringify([null, "/repo/app"]) });
+    expect(result.revision).toBe("a".repeat(64));
+    expect(result.truncated).toBe(false);
+    expect(result.catalog).toEqual({
+      prefixes: ["/"],
+      commands: [{ name: "deploy", invocation: "/deploy", description: "Ship it.", origin: "home-skills" }],
+      coverage: "partial",
+    });
+    for (const key of [
+      "wrongTarget", "wrongSession", "wrongProject", "missingScope", "missingRevision",
+      "badCoverage", "badTruncated", "badPrefix", "noPrefixes", "unsupportedWithCommands",
+      "overlongInvocation", "whitespaceInvocation", "foreignInvocation", "missingOrigin", "tooMany",
+    ] as const) {
+      expect(result[key], key).toBe(true);
+    }
+    expect(result.longWarningsTrimmed).toBe(16);
+    expect(result.unsupported).toEqual({ prefixes: [], commands: [], coverage: "unsupported" });
+    expect(result.scopeFromAgent).toEqual({ target: "w1:p1", sessionId: "sess-1", project: JSON.stringify(["/repo", "/repo/app"]) });
+    expect(result.noSession).toBeNull();
+    expect(result.noCwd).toBeNull();
   });
 });
 

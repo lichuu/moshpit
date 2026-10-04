@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdtemp, mkdir, writeFile, rm, symlink, utimes } from "node:fs/promises";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
+// This Node build ships no fs.mkfifo; the coreutils binary is the fallback.
+const mkfifo = (file) => execFileAsync("mkfifo", [file]);
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { listAgentCommands } from "./commands.mjs";
+import { listAgentCommands, scanAgentCommands, ScanStoppedError } from "./commands.mjs";
 
 function skillHome(name, skills) {
   return Promise.all(
@@ -60,11 +65,10 @@ function skillHome(name, skills) {
   const codex = await listAgentCommands("codex", home);
   assert.equal(codex.prefix, "$");
   assert.deepEqual(codex.commands, [{ name: "deploy", invocation: "$deploy", description: "Deploy the service." }]);
-  assert.equal(claude.coverage, "full");
-  // Extension commands exist only inside the running pi, so pi is partial.
+  assert.equal(claude.coverage, "partial");
   assert.equal(pi.coverage, "partial");
   assert.deepEqual(pi.prefixes, ["/skill:", "/"]);
-  assert.equal(codex.coverage, "full");
+  assert.equal(codex.coverage, "partial");
   // opencode 2.0 promotes the shared ~/.claude skill tree to slash commands,
   // so this home yields the two entries whose frontmatter carries both a name
   // and a description. The config directory is passed explicitly so a real
@@ -76,7 +80,7 @@ function skillHome(name, skills) {
   assert.deepEqual(await listAgentCommands("toString", home), { kind: "toString", prefix: "", prefixes: [], commands: [], coverage: "unsupported" });
   assert.deepEqual(await listAgentCommands(4, home), { kind: "", prefix: "", prefixes: [], commands: [], coverage: "unsupported" });
   const missing = await listAgentCommands("claude", path.join(home, "absent"));
-  assert.deepEqual(missing, { kind: "claude", prefix: "/", prefixes: ["/"], commands: [], coverage: "full" });
+  assert.deepEqual(missing, { kind: "claude", prefix: "/", prefixes: ["/"], commands: [], coverage: "partial" });
   // A frontmatter name never shadows the directory name for claude; the description is capped.
   await skillHome(home, { ".claude/skills": [["capped", "---\nname: other\ndescription: " + "d".repeat(999) + "\n---\n"]] });
   const capped = await listAgentCommands("claude", home);
@@ -92,6 +96,11 @@ function skillHome(name, skills) {
   assert.ok(!withLinks.commands.some((c) => c.name === "broken"), "broken symlink is skipped");
   await rm(home, { recursive: true, force: true });
 }
+
+{
+  // The result cap stops the scan, marks truncation, and reports it
+  // categorically. Which 200 of 205 survive depends on directory order, so
+  // assert the bound and the flag, not a specific survivor.
   const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-cap-"));
   await Promise.all(
     Array.from({ length: 205 }, (_, i) => {
@@ -103,8 +112,108 @@ function skillHome(name, skills) {
   const capped = await listAgentCommands("claude", home);
   assert.equal(capped.commands.length, 200);
   assert.equal(capped.coverage, "partial");
-  assert.deepEqual(capped.commands[0].name, "skill-000");
+  const scan = await scanAgentCommands({ kind: "claude", home });
+  assert.equal(scan.commands.length, 200);
+  assert.equal(scan.truncated, true);
+  assert.ok(scan.warnings.includes("cap_results"), "truncation is reported categorically");
+  assert.ok(scan.commands.every((c) => c.origin === "home-skills"), "entries carry their bounded origin");
   await rm(home, { recursive: true, force: true });
+}
+
+{
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-entries-"));
+  const wide = path.join(home, ".claude", "skills");
+  await mkdir(wide, { recursive: true });
+  await Promise.all(
+    Array.from({ length: 1100 }, (_, i) =>
+      mkdir(path.join(wide, `empty-${String(i).padStart(4, "0")}`), { recursive: true }),
+    ),
+  );
+  const scan = await scanAgentCommands({ kind: "claude", home });
+  assert.equal(scan.commands.length, 0);
+  assert.equal(scan.truncated, true);
+  assert.ok(scan.warnings.includes("cap_entries"), "the examined-entry cap is reported");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-depth-"));
+  let dir = path.join(home, ".agents", "skills");
+  for (let i = 0; i < 12; i += 1) dir = path.join(dir, `level-${i}`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, "SKILL.md"), "---\nname: deep\ndescription: Too deep.\n---\n");
+  const scan = await scanAgentCommands({ kind: "opencode", home, configHome: path.join(home, "absent-config") });
+  assert.equal(scan.commands.length, 0);
+  assert.equal(scan.truncated, true);
+  assert.ok(scan.warnings.includes("cap_depth"), "the depth cap is reported");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-bounds-"));
+  const big = path.join(home, ".claude", "skills", "big");
+  await mkdir(big, { recursive: true });
+  await writeFile(path.join(big, "SKILL.md"), "---\nname: big\ndescription: d\n---\n" + "x".repeat(256 * 1024));
+  const long = path.join(home, ".claude", "skills", "n".repeat(90));
+  await mkdir(long, { recursive: true });
+  await writeFile(path.join(long, "SKILL.md"), "---\nname: long\ndescription: d\n---\n");
+  const ok = path.join(home, ".claude", "skills", "ok");
+  await mkdir(ok, { recursive: true });
+  await writeFile(path.join(ok, "SKILL.md"), "---\nname: ok\ndescription: Fine.\n---\n");
+  const scan = await scanAgentCommands({ kind: "claude", home });
+  assert.deepEqual(scan.commands.map((c) => c.name), ["ok"]);
+  assert.ok(scan.warnings.includes("metadata_oversized"), "oversized metadata is reported");
+  assert.ok(scan.warnings.includes("name_overlong"), "overlong names are reported");
+  assert.ok(scan.warnings.every((w) => !w.includes(home)), "warnings carry no filesystem paths");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-revision-"));
+  await skillHome(home, { ".claude/skills": [["one", "---\nname: one\ndescription: One.\n---\n"]] });
+  const first = await scanAgentCommands({ kind: "claude", home });
+  const again = await scanAgentCommands({ kind: "claude", home });
+  assert.equal(first.revision, again.revision, "an unchanged home revises identically");
+  assert.match(first.revision, /^[0-9a-f]{64}$/);
+  await skillHome(home, { ".claude/skills": [["two", "---\nname: two\ndescription: Two.\n---\n"]] });
+  const changed = await scanAgentCommands({ kind: "claude", home });
+  assert.notEqual(changed.revision, first.revision, "a changed source revises");
+  const absent = await scanAgentCommands({ kind: "claude", home: path.join(home, "absent") });
+  assert.equal(absent.commands.length, 0);
+  assert.ok(absent.warnings.includes("source_missing"), "a missing root is reported");
+  assert.notEqual(absent.revision, first.revision);
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-stop-"));
+  await skillHome(home, { ".claude/skills": [["one", "---\nname: one\ndescription: One.\n---\n"]] });
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(
+    scanAgentCommands({ kind: "claude", home, signal: aborted.signal }),
+    (error) => error instanceof ScanStoppedError && error.reason === "aborted",
+  );
+  let clock = 0;
+  const slow = await (async () => {
+    try {
+      await scanAgentCommands({
+        kind: "claude",
+        home,
+        deadlineMs: 5,
+        now: () => {
+          clock += 10;
+          return clock;
+        },
+      });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  })();
+  assert.ok(slow instanceof ScanStoppedError && slow.reason === "deadline", "the deadline stops the scan");
+  await rm(home, { recursive: true, force: true });
+}
 
 {
   // opencode: markdown commands under the XDG config directory, both
@@ -199,5 +308,114 @@ function skillHome(name, skills) {
   await rm(home, { recursive: true, force: true });
 }
 
+{
+  // A FIFO at a metadata path must not hold the scan: the non-blocking open
+  // refuses it before any read, and a symlink to a regular file still loads.
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-fifo-"));
+  const skillsDir = path.join(home, ".claude", "skills");
+  const probe = path.join(skillsDir, "probe");
+  await mkdir(probe, { recursive: true });
+  await mkfifo(path.join(probe, "SKILL.md"));
+  await mkdir(path.join(skillsDir, "ok"), { recursive: true });
+  await writeFile(path.join(skillsDir, "ok", "SKILL.md"), "---\nname: ok\ndescription: Fine.\n---\n");
+  const linkedDir = path.join(skillsDir, "linkeddir");
+  await mkdir(linkedDir, { recursive: true });
+  await writeFile(path.join(home, "real-skill.md"), "---\nname: linked-file\ndescription: Behind a file link.\n---\n");
+  await symlink(path.join(home, "real-skill.md"), path.join(linkedDir, "SKILL.md"));
+  const startedAt = Date.now();
+  const scan = await scanAgentCommands({ kind: "claude", home, signal: AbortSignal.timeout(100) });
+  assert.ok(Date.now() - startedAt < 1000, "a FIFO metadata path did not hold the scan");
+  assert.deepEqual(scan.commands.map((c) => c.name), ["linkeddir", "ok"]);
+  assert.ok(scan.warnings.includes("source_unreadable"), "the FIFO is reported categorically");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  // A whitespace- or control-bearing scanner name is refused categorically
+  // and never invalidates the neighboring valid commands.
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-invalid-"));
+  await skillHome(home, {
+    ".claude/skills": [
+      ["bad skill", "---\nname: bad skill\ndescription: Spaced.\n---\n"],
+      ["ok", "---\nname: ok\ndescription: Fine.\n---\n"],
+    ],
+    ".pi/agent/skills": [["ctl", "---\nname: bad\u0001name\ndescription: Control.\n---\n"]],
+  });
+  const scan = await scanAgentCommands({ kind: "claude", home });
+  assert.deepEqual(scan.commands.map((c) => c.name), ["ok"]);
+  assert.ok(scan.warnings.includes("name_invalid"), "the invalid name is reported categorically");
+  assert.ok(scan.commands.every((c) => !/\s/.test(c.invocation)), "no invocation carries whitespace");
+  const pi = await scanAgentCommands({ kind: "pi", home });
+  assert.equal(pi.commands.length, 0);
+  assert.ok(pi.warnings.includes("name_invalid"), "a control-bearing frontmatter name is refused");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  if (process.getuid?.() !== 0) {
+    // Unreadable metadata under an accessible root is source_unreadable, not
+    // source_missing, and does not stop the rest of the scan.
+    const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-unreadable-"));
+    await skillHome(home, {
+      ".claude/skills": [
+        ["secret", "---\nname: secret\ndescription: Hidden.\n---\n"],
+        ["ok", "---\nname: ok\ndescription: Fine.\n---\n"],
+      ],
+    });
+    await chmod(path.join(home, ".claude", "skills", "secret", "SKILL.md"), 0o000);
+    const scan = await scanAgentCommands({ kind: "claude", home });
+    assert.deepEqual(scan.commands.map((c) => c.name), ["ok"]);
+    assert.ok(scan.warnings.includes("source_unreadable"), "inaccessible metadata is reported");
+    assert.ok(!scan.warnings.includes("source_missing"), "an inaccessible file is not a missing source");
+    await chmod(path.join(home, ".claude", "skills", "secret", "SKILL.md"), 0o644);
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+{
+  // The revision carries descriptor identity: a metadata symlink swapped
+  // between same-size, same-mtime targets revises.
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-swap-"));
+  const real = path.join(home, "real");
+  await mkdir(real, { recursive: true });
+  const a = path.join(real, "a.md");
+  const b = path.join(real, "b.md");
+  await writeFile(a, "---\nname: one\ndescription: A.\n---\n");
+  await writeFile(b, "---\nname: one\ndescription: B.\n---\n");
+  const stamp = new Date(1700000000000);
+  await utimes(a, stamp, stamp);
+  await utimes(b, stamp, stamp);
+  const skillDir = path.join(home, ".claude", "skills", "probe");
+  await mkdir(skillDir, { recursive: true });
+  const link = path.join(skillDir, "SKILL.md");
+  await symlink(a, link);
+  const first = await scanAgentCommands({ kind: "claude", home });
+  await rm(link);
+  await symlink(b, link);
+  const second = await scanAgentCommands({ kind: "claude", home });
+  assert.notEqual(second.revision, first.revision, "a same-size same-mtime symlink swap revises");
+  await rm(home, { recursive: true, force: true });
+}
+
+{
+  // The revision associates each fingerprint with its source: the same
+  // relative name in two sources revises when only one changes.
+  const home = await mkdtemp(path.join(tmpdir(), "moshpit-commands-xsource-"));
+  const claudeX = path.join(home, ".claude", "skills", "x", "SKILL.md");
+  const agentsX = path.join(home, ".agents", "skills", "x", "SKILL.md");
+  await mkdir(path.dirname(claudeX), { recursive: true });
+  await mkdir(path.dirname(agentsX), { recursive: true });
+  await writeFile(claudeX, "---\nname: x\ndescription: One.\n---\n");
+  await writeFile(agentsX, "---\nname: x\ndescription: One.\n---\n");
+  const first = await scanAgentCommands({ kind: "opencode", home, configHome: path.join(home, "absent-config") });
+  await writeFile(agentsX, "---\nname: x\ndescription: A longer description.\n---\n");
+  const second = await scanAgentCommands({ kind: "opencode", home, configHome: path.join(home, "absent-config") });
+  assert.notEqual(second.revision, first.revision, "a cross-source same-name change revises");
+  await rm(home, { recursive: true, force: true });
+}
+
 console.log("ok   per-kind skill catalogs, /skill: pi invocations, frontmatter, unknown kinds, caps");
 console.log("ok   opencode command files, both spellings, nesting, and 2.0 skill trees");
+console.log("ok   bounded scan: entry/depth/size caps, overlong names, categorical warnings, revision");
+console.log("ok   deadline and abort stop the scan without publishing");
+console.log("ok   FIFO refusal, invalid names, unreadable sources, descriptor-identity revision");
