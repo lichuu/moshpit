@@ -547,7 +547,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     </div>
     <div className={`composer-panel shrink-0 rounded-2xl border bg-bg p-2 focus-within:border-accent/70 ${dragging ? "border-accent ring-2 ring-accent/20" : "border-border-strong"}`}>
       {dragging && <p className="p-2 text-sm text-accent">Drop an image here</p>}
-      {draft.attachment && <div className="mb-1 flex items-center gap-2 rounded-lg bg-surface p-2">
+      {draft.attachment && <div className="composer-attachment mb-1 flex items-center gap-2 rounded-lg bg-surface p-2">
         {preview && <img src={preview} alt={`Attachment preview: ${draft.attachment.name}`} className="size-10 rounded object-cover" />}
         <span className="min-w-0 flex-1 truncate text-xs">{draft.attachment.name}</span>
         <button type="button" aria-label="Remove image" className="p-2" onClick={() => saved.update({ attachment: null })}><X className="size-4" /></button>

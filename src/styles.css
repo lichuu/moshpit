@@ -230,14 +230,28 @@ html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-bloc
 }
 html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 4px;
+}
+/* The attachment chip and the drop hint are not part of that row. */
+html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > .composer-attachment,
+html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > p {
+  flex: 0 0 100%;
+  min-width: 0;
+  margin-bottom: 0;
 }
 html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel textarea {
   flex: 1;
   min-width: 0;
   max-height: 44px;
+}
+/* The row is too narrow for the placeholder, which would wrap onto a second
+   line that max-height cuts in half. */
+html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel textarea:placeholder-shown {
+  overflow: hidden;
+  white-space: nowrap;
 }
 html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > div {
   flex-shrink: 0;
