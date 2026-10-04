@@ -176,6 +176,8 @@ test.describe("compact terminal composer", () => {
     const input = demo.getByRole("textbox", { name: "Terminal input" });
     const width = async () => (await input.boundingBox())?.width ?? 0;
     const bare = await width();
+    // A portrait phone stacks the actions under the input, as Chat does.
+    expect(bare).toBeGreaterThan(300);
     await demo.locator('input[type="file"][accept="image/*"]').setInputFiles({
       name: "Screenshot 2026-01-01 at 10.00.00.png",
       mimeType: "image/png",
@@ -183,6 +185,22 @@ test.describe("compact terminal composer", () => {
     });
     await expect(demo.getByRole("button", { name: "Remove image" })).toBeVisible();
     expect(await width()).toBe(bare);
+  });
+
+  test("a long draft grows past two lines while the pane and Send stay on screen", async ({ demo }) => {
+    await openTerminal(demo);
+    await demo.setViewportSize({ width: 390, height: 500 });
+    await expect(demo.locator("html")).toHaveAttribute("data-compact", "true");
+
+    const input = demo.getByRole("textbox", { name: "Terminal input" });
+    await input.fill("one two three four five six seven eight nine ten ".repeat(6));
+    const pane = demo.getByRole("application", { name: /^Pane / });
+    const send = demo.getByRole("button", { name: "Send", exact: true });
+    await expect.poll(async () => (await input.boundingBox())?.height ?? 0).toBeGreaterThan(60);
+    const row = await pane.locator("pre > div").first().boundingBox();
+    expect((await pane.boundingBox())!.height).toBeGreaterThanOrEqual(2 * row!.height - 1);
+    const sendBox = (await send.boundingBox())!;
+    expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(500);
   });
 });
 
