@@ -40,9 +40,8 @@ async function approvedBrowser(page: Page, bridge: Bridge) {
   await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
 }
 
-/** A browser that signs in with the password but holds no device, then asks for access. */
-async function askingBrowser(page: Page, bridge: Bridge, name = "Laptop") {
-  await openHosts(page, bridge);
+/** The login and access-request sequence for a browser already at Hosts. */
+async function askAccess(page: Page, bridge: Bridge, name = "Laptop") {
   await page.getByRole("button", { name: "Connect" }).click();
   await page.getByLabel("Bridge password").fill(BRIDGE_PASSWORD);
   await page.getByRole("button", { name: "Unlock" }).click();
@@ -51,6 +50,12 @@ async function askingBrowser(page: Page, bridge: Bridge, name = "Laptop") {
   const phrase = page.getByLabel("Verification phrase");
   await expect(phrase).toHaveText(/^[a-z]+ [a-z]+ [a-z]+$/);
   return (await phrase.textContent()) ?? "";
+}
+
+/** A browser that signs in with the password but holds no device, then asks for access. */
+async function askingBrowser(page: Page, bridge: Bridge, name = "Laptop") {
+  await openHosts(page, bridge);
+  return askAccess(page, bridge, name);
 }
 
 async function held(page: Page, bridge: Bridge) {
@@ -66,14 +71,20 @@ async function admin(bridge: Bridge, message: object) {
 test("an approved browser approves a new one, which redeems once and reaches its herd", async ({ page, bridge, browser }, testInfo) => {
   const host = await bridge({ herdr });
   const asker = await secondPage(browser, testInfo);
-  const sent: Request[] = [];
-  const finished = new Set<Request>();
-  asker.on("request", (request) => sent.push(request));
-  asker.on("requestfinished", (request) => finished.add(request));
   await countPermissionPrompts(asker.context());
+  // Audit boundary: bootstrap (navigation, onboarding, seedHosts reload)
+  // completes and the page idles before the collector is installed. The
+  // enrollment secret is created by the access request below, so no
+  // earlier request could carry it, and no collected request is a load
+  // cancelled by the reload — every one reaches the network, so its
+  // headers can be audited.
+  await openHosts(asker, host);
+  await asker.waitForLoadState("networkidle");
+  const sent: Request[] = [];
+  asker.on("request", (request) => sent.push(request));
 
   await approvedBrowser(page, host);
-  const phrase = await askingBrowser(asker, host);
+  const phrase = await askAccess(asker, host);
   await expect(asker.getByText("Approve this browser from a device that already has access, or run moshpit devices approve on the host.")).toBeVisible();
   const { secret } = await held(asker, host);
   expect(secret).toMatch(/^[A-Za-z0-9_-]{22}$/);
@@ -98,14 +109,6 @@ test("an approved browser approves a new one, which redeems once and reaches its
   for (const request of sent) {
     const { pathname } = new URL(request.url());
     expect(request.url()).not.toContain(secret);
-    if (!finished.has(request)) {
-      // A request the page cancelled before it reached the network (the
-      // seedHosts reload cancels in-flight loads) finalizes no headers, so
-      // there is no header evidence to audit; URL and body are still
-      // checked, and the request never reached the server.
-      expect(request.postData() ?? "", request.url()).not.toContain(secret);
-      continue;
-    }
     for (const value of Object.values(await request.allHeaders())) expect(value).not.toContain(secret);
     if (request.postData()?.includes(secret)) carriers.add(pathname);
   }
