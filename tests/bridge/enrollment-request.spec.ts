@@ -67,7 +67,9 @@ test("an approved browser approves a new one, which redeems once and reaches its
   const host = await bridge({ herdr });
   const asker = await secondPage(browser, testInfo);
   const sent: Request[] = [];
+  const finished = new Set<Request>();
   asker.on("request", (request) => sent.push(request));
+  asker.on("requestfinished", (request) => finished.add(request));
   await countPermissionPrompts(asker.context());
 
   await approvedBrowser(page, host);
@@ -96,6 +98,14 @@ test("an approved browser approves a new one, which redeems once and reaches its
   for (const request of sent) {
     const { pathname } = new URL(request.url());
     expect(request.url()).not.toContain(secret);
+    if (!finished.has(request)) {
+      // A request the page cancelled before it reached the network (the
+      // seedHosts reload cancels in-flight loads) finalizes no headers, so
+      // there is no header evidence to audit; URL and body are still
+      // checked, and the request never reached the server.
+      expect(request.postData() ?? "", request.url()).not.toContain(secret);
+      continue;
+    }
     for (const value of Object.values(await request.allHeaders())) expect(value).not.toContain(secret);
     if (request.postData()?.includes(secret)) carriers.add(pathname);
   }
