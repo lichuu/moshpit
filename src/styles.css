@@ -210,9 +210,11 @@ html[data-layout="phone"][data-compact="true"] .composer-wrap > p,
 html[data-layout="phone"][data-compact="true"] .composer-keys {
   display: none;
 }
+/* Two lines at least. Height the keyboard leaves beyond 400px goes to the
+   draft, up to four lines, so a longer message stays readable while typing. */
 html[data-layout="phone"][data-compact="true"] .composer-panel textarea {
   min-height: 44px;
-  max-height: 60px;
+  max-height: clamp(60px, calc(var(--app-height, 100dvh) - 400px), 112px);
 }
 html[data-layout="phone"][data-compact="true"] .terminal-keys {
   padding-block: 4px;
@@ -220,41 +222,40 @@ html[data-layout="phone"][data-compact="true"] .terminal-keys {
 html[data-layout="phone"][data-compact="true"] .terminal-keys > div {
   margin-bottom: 0;
 }
-/* Compact terminal: quick replies live in the key bar, so the composer is
-   one row of textarea plus actions and the pane keeps its two-line floor. */
 html[data-layout="phone"][data-compact="true"] .terminal-composer {
   padding-block: 4px;
 }
 html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-blocks {
   flex-grow: 0;
 }
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-}
-/* The attachment chip and the drop hint are not part of that row. */
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > .composer-attachment,
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > p {
-  flex: 0 0 100%;
-  min-width: 0;
-  margin-bottom: 0;
-}
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel textarea {
-  flex: 1;
-  min-width: 0;
-  max-height: 44px;
-}
-/* The row is too narrow for the placeholder, which would wrap onto a second
-   line that max-height cuts in half. */
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel textarea:placeholder-shown {
-  overflow: hidden;
-  white-space: nowrap;
-}
-html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > div {
-  flex-shrink: 0;
+/* A short and wide phone (landscape) has no height to spare, so the Terminal
+   composer is one row of textarea plus actions and the pane keeps its
+   two-line floor. A portrait phone with the keyboard up is short but narrow:
+   one row would leave the textarea a third of the width, so it keeps the
+   stacked layout Chat uses. */
+@media (min-width: 560px) {
+  html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+  }
+  html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel textarea {
+    flex: 1;
+    min-width: 0;
+    max-height: 44px;
+  }
+  html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > div {
+    flex-shrink: 0;
+  }
+  /* The attachment chip and the drop hint are not part of that row. */
+  html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > .composer-attachment,
+  html[data-layout="phone"][data-compact="true"] .terminal-composer .composer-panel > p {
+    flex: 0 0 100%;
+    min-width: 0;
+    margin-bottom: 0;
+  }
 }
 html[data-layout="phone"][data-compact="true"] .terminal-pane {
   min-height: 2.5em;
