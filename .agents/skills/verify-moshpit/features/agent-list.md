@@ -1,6 +1,6 @@
 # Agent list
 
-The moshpit tab groups agents under collapsible project headers. Each project contains agent cards ordered by status. Project headers retain attention counts while collapsed, and status filters reveal matching children. Project identity uses the repository root, then the working folder or workspace, scoped to the connected host.
+The moshpit tab groups agents under collapsible project headers. Project headers are alphabetical. Each project contains agent cards ordered by newest message, sent or received; agents with no known message time follow by name. Project headers retain attention counts while collapsed, and status filters reveal matching children. Project identity uses the repository root, then the working folder or workspace, scoped to the connected host.
 
 ## Sub-features
 

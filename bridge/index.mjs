@@ -612,7 +612,9 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && pathname === "/api/snapshot") {
-      json(res, 200, await herdr.snapshot());
+      const snapshot = await herdr.snapshot();
+      const agents = await Promise.all(snapshot.agents.map(async (agent) => ({ ...agent, lastMessageAt: await sessionReader.lastMessageAt(agent) })));
+      json(res, 200, { ...snapshot, agents });
       return;
     }
     if (req.method === "GET" && pathname === "/api/agent-detail") {

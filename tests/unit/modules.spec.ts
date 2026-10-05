@@ -3,6 +3,8 @@ import { DEV_URL } from "../../playwright.config";
 
 // Resolved by vite in the browser, not by tsc, so they are passed as data.
 const DRAFTS = "/src/lib/moshpit/drafts.ts";
+const STORE = "/src/lib/moshpit/store.ts";
+const PROJECTS = "/src/lib/moshpit/projects.ts";
 const SESSION = "/src/lib/moshpit/session.ts";
 const LINK_TARGET = "/src/components/moshpit/link-target.ts";
 const KEYS = "/src/lib/moshpit/keys.ts";
@@ -104,6 +106,35 @@ test.describe("draft store", () => {
     expect(restored.bytes).toBe("image bytes");
     // Terminal and conversation drafts are separate keys for the same agent.
     expect(restored.terminal).toBe("terminal draft");
+  });
+});
+
+test.describe("agent list order", () => {
+  test("sessions sort by newest message and projects by name", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+
+    const order = await page.evaluate(async ([storeMod, projectsMod]) => {
+      const { sortedAgents } = await import(storeMod);
+      const { groupAgentsByProject } = await import(projectsMod);
+      const agent = (id: string, cwd: string, lastMessageAt?: number, status = "idle") =>
+        ({ id, name: id, cwd, status, attention: status === "blocked", lastMessageAt });
+      const agents = [
+        agent("old", "/src/zebra", 100, "blocked"),
+        agent("silent-b", "/src/zebra"),
+        agent("new", "/src/zebra", 300),
+        agent("silent-a", "/src/zebra"),
+        agent("mid", "/src/Apple", 200, "working"),
+        agent("only", "/src/mango", 50),
+      ];
+      return groupAgentsByProject(sortedAgents(agents, "all"), "host")
+        .map((project: { name: string; agents: { id: string }[] }) => [project.name, project.agents.map((a) => a.id)]);
+    }, [STORE, PROJECTS]);
+
+    expect(order).toEqual([
+      ["Apple", ["mid"]],
+      ["mango", ["only"]],
+      ["zebra", ["new", "old", "silent-a", "silent-b"]],
+    ]);
   });
 });
 

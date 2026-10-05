@@ -106,6 +106,8 @@ export type Agent = {
   lines: PaneLine[];
   attention: boolean;
   statusChangedAt: number;
+  /** When the session's newest message was sent or received, when known. */
+  lastMessageAt?: number;
   workTicks: number;
   ticks: number;
   nextStatus: AgentStatus | null;
