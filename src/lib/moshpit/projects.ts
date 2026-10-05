@@ -22,5 +22,9 @@ export function groupAgentsByProject(agents: Agent[], hostId: string): ProjectGr
     group.agents.push(agent);
     if (agent.status === "blocked" || agent.attention) group.attention++;
   }
-  return [...groups.values()];
+  return [...groups.values()].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }) ||
+      a.path.localeCompare(b.path),
+  );
 }

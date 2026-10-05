@@ -329,7 +329,43 @@ export function createSessionReader(options = {}) {
     state.entries = next;
     return state;
   }
-  return async function read(agent, query = {}) {
+  // When the newest message in a session was sent or received, for ordering
+  // the agent list. Only the file's tail is read, and only when it changed.
+  // ponytail: a 256KB tail; a turn that writes more tool output than that
+  // without a message keeps the time of the last message seen.
+  const activity = new Map();
+  async function lastMessageAt(agent) {
+    const kind = agent.kind === "claude-code" ? "claude" : agent.kind;
+    if (!["codex", "claude", "pi", "grok"].includes(kind) || !agent.session?.value) return undefined;
+    const key = `${kind}:${agent.session.kind}:${agent.session.value}`;
+    const hit = activity.get(key);
+    try {
+      // A session with no file yet is looked for again later, not on every poll.
+      if (hit?.retryAt > Date.now()) return undefined;
+      const source = await locate(agent, kind);
+      const info = await stat(source);
+      const signature = `${info.size}:${info.mtimeMs}`;
+      if (hit?.signature === signature) return hit.at;
+      const size = Math.min(info.size, 262144);
+      const buffer = Buffer.alloc(size);
+      const file = await open(source, "r");
+      try { await file.read(buffer, 0, size, info.size - size); } finally { await file.close(); }
+      const records = [];
+      for (const line of buffer.toString("utf8").split("\n")) {
+        try { if (line.trim()) records.push(JSON.parse(line)); } catch { /* a first line the tail cut in half */ }
+      }
+      const newest = normalize(kind, records).findLast((entry) => entry.kind === "message" && entry.at);
+      const at = (newest && Date.parse(newest.at)) || hit?.at || Math.round(info.mtimeMs);
+      activity.set(key, { signature, at });
+      return at;
+    } catch {
+      activity.set(key, { retryAt: Date.now() + 30_000 });
+      return undefined;
+    }
+  }
+  read.lastMessageAt = lastMessageAt;
+  return read;
+  async function read(agent, query = {}) {
     try {
       const kind = agent.kind === "claude-code" ? "claude" : agent.kind;
       if (!["codex", "claude", "pi", "grok", "opencode"].includes(kind)) throw new Error(`Native conversation is not available for ${agent.kind}. Use Terminal.`);
@@ -356,5 +392,5 @@ export function createSessionReader(options = {}) {
     } catch (error) {
       return { kind: "unavailable", agentId: agent.id, reason: error.code === "ENOENT" ? "The native session file is not available yet." : error.message };
     }
-  };
+  }
 }

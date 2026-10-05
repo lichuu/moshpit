@@ -108,14 +108,6 @@ const settingsGuardedStorage = (ls: Storage) => {
   };
 };
 
-const STATUS_RANK: Record<AgentStatus, number> = {
-  blocked: 0,
-  working: 1,
-  done: 2,
-  idle: 3,
-  unknown: 4,
-};
-
 type NewHost = {
   label: string;
   transport: Transport;
@@ -1979,12 +1971,14 @@ export const useMoshpitStore = create<MoshpitState>()(
 export function sortedAgents(agents: Agent[], filter: FilterId) {
   const list =
     filter === "all" ? agents : agents.filter((a) => a.status === filter);
-  return [...list].sort((a, b) => {
-    const r = STATUS_RANK[a.status] - STATUS_RANK[b.status];
-    if (r !== 0) return r;
-    if (a.attention !== b.attention) return a.attention ? -1 : 1;
-    return a.statusChangedAt - b.statusChangedAt;
-  });
+  // Newest conversation first, like a message list. The name and id settle
+  // ties, so agents with no known message time keep a fixed order.
+  return [...list].sort(
+    (a, b) =>
+      (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) ||
+      a.name.localeCompare(b.name) ||
+      a.id.localeCompare(b.id),
+  );
 }
 
 export function blockedCount(agents: Agent[]) {

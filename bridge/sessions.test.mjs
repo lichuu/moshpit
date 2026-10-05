@@ -83,6 +83,19 @@ test("Claude native content supports tools, errors, and ignores sidechains", asy
   assert.deepEqual(result.capabilities, { inputModes: ["send"], stop: false, fit: false });
 });
 
+test("lastMessageAt is the newest message's time, not the newest tool row's", async (t) => {
+  const { agent, read, file } = await fixture(t, "claude", [
+    { type: "user", uuid: "u", timestamp: "2026-01-01T10:00:00.000Z", message: { content: "Hello" } },
+    { type: "assistant", uuid: "a", timestamp: "2026-01-01T10:00:05.000Z", message: { content: [{ type: "text", text: "Checking" }] } },
+    { type: "assistant", uuid: "b", timestamp: "2026-01-01T10:09:00.000Z", message: { content: [{ type: "tool_use", id: "t", name: "Bash", input: { command: "ls" } }] } },
+  ]);
+  assert.equal(await read.lastMessageAt(agent), Date.parse("2026-01-01T10:00:05.000Z"));
+  await appendFile(file, JSON.stringify({ type: "user", uuid: "v", timestamp: "2026-01-01T10:20:00.000Z", message: { content: "Next" } }) + "\n");
+  assert.equal(await read.lastMessageAt(agent), Date.parse("2026-01-01T10:20:00.000Z"));
+  assert.equal(await read.lastMessageAt({ id: "pane", kind: "claude" }), undefined);
+  assert.equal(await read.lastMessageAt({ ...agent, kind: "opencode" }), undefined);
+});
+
 test("Claude rows the harness injected stay out of the conversation", async (t) => {
   const { agent, read } = await fixture(t, "claude", [
     { type: "user", uuid: "u", message: { content: "use the skill" } },

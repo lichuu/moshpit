@@ -1,6 +1,6 @@
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { useLayout } from "@/lib/moshpit/use-layout";
-import { useMoshpitStore } from "@/lib/moshpit/store";
+import { sortedAgents, useMoshpitStore } from "@/lib/moshpit/store";
 import { StatusPill } from "@/components/moshpit/status-pill";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
 import type { Agent } from "@/lib/moshpit/types";
@@ -31,7 +31,7 @@ export function JumpSheet() {
 
   if (!open) return null;
 
-  const groups = groupByProject(agents);
+  const groups = groupByProject(sortedAgents(agents, "all"));
 
   return (
     <div
@@ -58,7 +58,7 @@ export function JumpSheet() {
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-subtle">
           Jump to
         </p>
-        {[...groups.entries()].map(([ws, list]) => (
+        {[...groups.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })).map(([ws, list]) => (
           <section key={ws} className="mt-4">
             <h3 className="text-sm font-medium">{ws}</h3>
             <ul className="mt-2 space-y-1.5">
