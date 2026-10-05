@@ -178,7 +178,9 @@ function normalize(kind, records) {
       if (row.type === "compacted") add({ kind: "status", text: p.message ?? "Conversation compacted" }, row);
       if (row.type === "event_msg" && ["task_complete", "turn_complete", "turn_aborted"].includes(p.type)) add({ kind: "status", text: p.type === "turn_aborted" ? "Turn stopped" : "Turn complete" }, row);
     } else if (kind === "claude") {
-      if (row.isSidechain) continue;
+      // isMeta rows are what the harness told the model, not what anyone
+      // typed: a loaded skill's SKILL.md, an attached image's dimensions.
+      if (row.isSidechain || row.isMeta) continue;
       if (["user", "assistant"].includes(row.type)) blocks(row.type, row.message?.content, row);
       if (row.type === "system" && row.subtype === "compact_boundary") add({ kind: "status", text: "Conversation compacted" }, row);
     } else if (kind === "pi") {

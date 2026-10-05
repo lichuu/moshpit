@@ -6,6 +6,7 @@ import path from "node:path";
 import { nativeCapabilities, submitNative } from "./native-input.mjs";
 
 const agent = { kind: "pi", status: "idle" };
+const pasted = (text) => `\x1b[200~${text}\x1b[201~`;
 
 async function callsFor(mode, { agent: a = agent, text = "hello" } = {}) {
   const calls = [];
@@ -27,10 +28,21 @@ async function rejectsFor(mode, { agent: a = agent, text = "hello" } = {}) {
 
 test("idle send is the native submit: text, then Enter — nothing that interrupts", async () => {
   const { calls, result } = await callsFor("send");
-  assert.deepEqual(calls, [["pane", "send-text", "w1:p1", "hello"], ["pane", "send-keys", "w1:p1", "enter"]]);
+  assert.deepEqual(calls, [["pane", "send-text", "w1:p1", pasted("hello")], ["pane", "send-keys", "w1:p1", "enter"]]);
   assert.equal(result.state, "delivered");
   assert.ok(!calls.some((c) => c.at(-1) === "esc"), "an idle send must not press esc");
   assert.ok(!calls.some((c) => c.at(-1) === "alt+enter"), "an idle send must not queue");
+});
+
+test("pi text arrives as a paste, so its completion list cannot take the Enter", async () => {
+  // Typed, "/model " opens pi's model completions and Enter accepts the first
+  // one instead of running the command.
+  const { calls } = await callsFor("terminal", { text: "/model " });
+  assert.deepEqual(calls, [["pane", "send-text", "w1:p1", pasted("/model ")], ["pane", "send-keys", "w1:p1", "enter"]]);
+  const closing = await callsFor("send", { text: "a\x1b[201~b" });
+  assert.deepEqual(closing.calls[0], ["pane", "send-text", "w1:p1", pasted("ab")]);
+  const claude = await callsFor("send", { agent: { kind: "claude", status: "idle" } });
+  assert.deepEqual(claude.calls[0], ["pane", "send-text", "w1:p1", "hello"]);
 });
 
 test("queue is the only mode that queues; steer keeps the native timing", async () => {
@@ -42,7 +54,7 @@ test("queue is the only mode that queues; steer keeps the native timing", async 
 
 test("a blocked agent inserts text and never presses Enter", async () => {
   const { calls, result } = await callsFor("send", { agent: { ...agent, status: "blocked" } });
-  assert.deepEqual(calls, [["pane", "send-text", "w1:p1", "hello"]]);
+  assert.deepEqual(calls, [["pane", "send-text", "w1:p1", pasted("hello")]]);
   assert.equal(result.state, "delivered");
   assert.ok(!calls.some((c) => c.at(-1) === "enter"), "Enter on a blocked dialog answers whatever is highlighted");
   const terminal = await callsFor("terminal", { agent: { ...agent, status: "blocked" }, text: "" });

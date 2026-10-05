@@ -96,6 +96,20 @@ test("lastMessageAt is the newest message's time, not the newest tool row's", as
   assert.equal(await read.lastMessageAt({ ...agent, kind: "opencode" }), undefined);
 });
 
+test("Claude rows the harness injected stay out of the conversation", async (t) => {
+  const { agent, read } = await fixture(t, "claude", [
+    { type: "user", uuid: "u", message: { content: "use the skill" } },
+    { type: "assistant", uuid: "a", message: { content: [{ type: "tool_use", id: "t", name: "Skill", input: { skill: "poteto-mode" } }] } },
+    { type: "user", uuid: "r", message: { content: [{ type: "tool_result", tool_use_id: "t", content: "Launching skill: poteto-mode" }] } },
+    { type: "user", uuid: "m", isMeta: true, sourceToolUseID: "t", message: { content: [{ type: "text", text: "Base directory for this skill: /home/u/.claude/skills/poteto-mode\n\n# Poteto mode" }] } },
+    { type: "user", uuid: "i", isMeta: true, message: { content: [{ type: "text", text: "[Image: original 1320x2868, displayed at 921x2000.]" }] } },
+    { type: "assistant", uuid: "b", message: { content: "On it" } },
+  ]);
+  const { entries } = await read(agent);
+  assert.deepEqual(entries.map((e) => e.text ?? e.title), ["use the skill", "Skill", "On it"]);
+  assert.equal(entries[2].turnId, "u");
+});
+
 test("truncation and wrong-session cursors reset rather than mixing histories", async (t) => {
   const { agent, read, file } = await fixture(t, "codex", [codexMessage("user", "A long initial prompt"), codexMessage("assistant", "Old answer")]);
   const first = await read(agent);

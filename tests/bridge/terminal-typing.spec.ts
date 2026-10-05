@@ -274,7 +274,7 @@ test("pane image paste cannot replace an attachment during delivery", async ({ p
   await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
 });
 
-test("pane image attachments stay with their agent session and Terminal draft", async ({ demo: page }, testInfo) => {
+test("pane image attachments stay with their agent session, in Chat and Terminal", async ({ demo: page }, testInfo) => {
   await page.getByRole("button", { name: /migrate/ }).first().click();
   await page.getByRole("button", { name: "Terminal view", exact: true }).click();
   const pane = page.getByRole("application", { name: "Pane w1:p2", exact: true });
@@ -282,13 +282,18 @@ test("pane image attachments stay with their agent session and Terminal draft", 
   await dispatchImagePaste(pane, { name: "migrate.png" });
   await expect(page.getByRole("img", { name: "Attachment preview: migrate.png", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Chat view", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("img", { name: "Attachment preview: migrate.png", exact: true })).toBeVisible();
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Back", exact: true }).click();
   await page.getByRole("button", { name: /postcard-ui/ }).first().click();
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Terminal view", exact: true }).click();
   await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
   if (isPhone(testInfo)) await page.getByRole("button", { name: "Back", exact: true }).click();
   await page.getByRole("button", { name: /migrate/ }).first().click();
   await page.getByRole("button", { name: "Terminal view", exact: true }).click();
   await expect(page.getByRole("img", { name: "Attachment preview: migrate.png", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Chat view", exact: true }).click();
+  await page.getByRole("button", { name: "Remove image", exact: true }).click();
+  await page.getByRole("button", { name: "Terminal view", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove image", exact: true })).toHaveCount(0);
 });
