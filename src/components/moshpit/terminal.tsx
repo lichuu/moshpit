@@ -9,7 +9,7 @@ import { bridgeUrl } from "@/lib/moshpit/bridge";
 import { projectOf } from "@/lib/moshpit/label";
 import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
-import { draftStore } from "@/lib/moshpit/drafts";
+import { draftSessionId, draftStore } from "@/lib/moshpit/drafts";
 import { validateImage } from "@/lib/moshpit/image";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
@@ -264,7 +264,7 @@ export function Terminal() {
   );
   const hostUrl = host ? bridgeUrl(host) : "";
   const terminalDraft = connected && composerAgent
-    ? draftStore([connected, composerAgent.sessionId ?? `unresolved:${targetId}`, "terminal"])
+    ? draftStore([connected, draftSessionId(composerAgent, Boolean(host?.demo)), "terminal"])
     : undefined;
   const attachImage = useCallback((image: File) => {
     if (!terminalDraft || terminalDraft.getSnapshot().draft.submission?.state === "submitting") return;

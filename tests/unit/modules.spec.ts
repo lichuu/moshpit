@@ -96,14 +96,105 @@ test.describe("draft store", () => {
         name: draft.attachment?.name,
         bytes: await draft.attachment?.text(),
         terminal: terminal.getSnapshot().draft.text,
+        terminalImage: terminal.getSnapshot().draft.attachment?.name,
       };
     }, DRAFTS);
 
     expect(restored.text).toBe("newer typing");
     expect(restored.name).toBe("draft.png");
     expect(restored.bytes).toBe("image bytes");
-    // Terminal and conversation drafts are separate keys for the same agent.
+    // Terminal and conversation keep separate text for the same agent, and
+    // share the session's image.
     expect(restored.terminal).toBe("terminal draft");
+    expect(restored.terminalImage).toBe("draft.png");
+  });
+
+  test("a session's image is shared by both views until one of them sends it", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+
+    const result = await page.evaluate(async (mod) => {
+      const { draftStore, listDrafts } = await import(mod);
+      const image = (name: string) => new File([name], name, { type: "image/png" });
+      const chat = draftStore(["host", "shared", "conversation"]);
+      const terminal = draftStore(["host", "shared", "terminal"]);
+      const elsewhere = draftStore(["host", "elsewhere", "terminal"]);
+      const name = (store: typeof chat) => store.getSnapshot().draft.attachment?.name ?? null;
+
+      chat.update({ text: "chat text", attachment: image("one.png") });
+      const attached = [name(chat), name(terminal), name(elsewhere)];
+      const terminalText = terminal.getSnapshot().draft.text;
+      await chat.flush();
+      const listed = (await listDrafts()).filter((item: { draft: { attachment: File | null } }) => item.draft.attachment).length;
+
+      // The other view swaps the image while this one's send is in flight:
+      // the delivery clears what it sent, not the replacement.
+      let revision = chat.getSnapshot().draft.revision;
+      chat.markSubmitting("one");
+      terminal.update({ attachment: image("two.png") });
+      chat.settle({ requestId: "one", state: "delivered" }, revision);
+      const replaced = [chat.getSnapshot().draft.text, name(chat), name(terminal)];
+
+      revision = terminal.getSnapshot().draft.revision;
+      terminal.markSubmitting("two");
+      terminal.settle({ requestId: "two", state: "delivered" }, revision);
+      const sent = [name(chat), name(terminal)];
+      await terminal.flush();
+      return { attached, terminalText, listed, replaced, sent };
+    }, DRAFTS);
+
+    expect(result).toEqual({
+      attached: ["one.png", "one.png", null],
+      terminalText: "",
+      listed: 1,
+      replaced: ["", "two.png", "two.png"],
+      sent: [null, null],
+    });
+
+    await page.reload();
+    const restored = await page.evaluate(async (mod) => {
+      const { draftStore } = await import(mod);
+      const chat = draftStore(["host", "shared", "conversation"]);
+      await chat.flush();
+      return chat.getSnapshot().draft.attachment?.name ?? null;
+    }, DRAFTS);
+    expect(restored).toBeNull();
+  });
+
+  test("an image saved in a view's own record moves to the session", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+
+    const names = await page.evaluate(async (mod) => {
+      const { draftStore } = await import(mod);
+      const key = JSON.stringify(["host", "legacy", "terminal"]);
+      await draftStore(["host", "warm", "conversation"]).flush();
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("moshpit-drafts", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const record = () => new Promise<{ attachment: File | null }>((resolve, reject) => {
+        const request = db.transaction("drafts").objectStore("drafts").get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction("drafts", "readwrite");
+        transaction.objectStore("drafts").put({ text: "old", attachment: new File(["x"], "old.png", { type: "image/png" }), revision: 1 }, key);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      const terminal = draftStore(["host", "legacy", "terminal"]);
+      const chat = draftStore(["host", "legacy", "conversation"]);
+      await terminal.flush();
+      await chat.flush();
+      return {
+        terminal: [terminal.getSnapshot().draft.text, terminal.getSnapshot().draft.attachment?.name],
+        chat: chat.getSnapshot().draft.attachment?.name,
+        record: (await record()).attachment,
+      };
+    }, DRAFTS);
+
+    expect(names).toEqual({ terminal: ["old", "old.png"], chat: "old.png", record: null });
   });
 });
 
