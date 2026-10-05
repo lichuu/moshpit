@@ -4,7 +4,7 @@ import { createPortal, flushSync } from "react-dom";
 import { toast } from "sonner";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { newId } from "@/lib/moshpit/events";
-import { draftStore, listDrafts, useDraft } from "@/lib/moshpit/drafts";
+import { draftSessionId, draftStore, listDrafts, useDraft } from "@/lib/moshpit/drafts";
 import type { DraftKey } from "@/lib/moshpit/drafts";
 import { bridgeUrl, encodeImage, fetchCommands } from "@/lib/moshpit/bridge";
 import { commandScope, detectCommandToken, insertPrefix, insertSuggestion, matchCommands, mergeCatalog, type CommandSuggestion, type DisplayCatalog, type RemoteCatalog, type TokenRange } from "@/lib/moshpit/commands";
@@ -77,7 +77,8 @@ function QuickRepliesMenu({ replies, disabled, onPick }: {
 const fallbackCapabilities: SessionCapabilities = { inputModes: [], stop: false, fit: false };
 export const Composer = memo(function Composer(props: Props) {
   const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
-  const sessionId = props.sessionId ?? props.agent.sessionId ?? `unresolved:${props.agent.id}`;
+  const demo = useMoshpitStore((s) => Boolean(s.hosts.find((h) => h.id === s.connectedHostId)?.demo));
+  const sessionId = props.sessionId ?? draftSessionId(props.agent, demo);
   const key: DraftKey = [hostId, sessionId, props.mode === "terminal" ? "terminal" : "conversation"];
   return <SessionComposer key={JSON.stringify(key)} {...props} draftKey={key} />;
 });

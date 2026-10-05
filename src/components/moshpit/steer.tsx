@@ -7,6 +7,7 @@ import { useMoshpitStore } from "@/lib/moshpit/store";
 import { Button } from "@/components/ui/button";
 import { bridgeUrl } from "@/lib/moshpit/bridge";
 import { useSession } from "@/lib/moshpit/session";
+import { draftSessionId } from "@/lib/moshpit/drafts";
 import { askOptionKeys } from "@/lib/moshpit/ask-keys";
 import type {
   SessionEntry,
@@ -103,7 +104,7 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
     session.value?.kind === "available" ? session.value : undefined;
   // The raw herdr session identity: the submission guard validates against it,
   // so the reader's hashed stream ID must not substitute here.
-  const sessionId = agent?.sessionId ?? (host?.demo ? `demo:${agent.id}` : undefined);
+  const sessionId = agent?.sessionId ?? (agent && host?.demo ? draftSessionId(agent, true) : undefined);
 
   if (!connected || !agent) {
     return (

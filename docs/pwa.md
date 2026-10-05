@@ -1150,7 +1150,7 @@ Tap a suggestion, or select it with Up/Down and insert with Tab/Enter. Insertion
 
 Use the paperclip in an agent conversation, paste an image from the clipboard, or drop an image onto the composer. Review the thumbnail, add a message if needed, and choose **Send**. PNG, JPEG, WebP, and GIF files up to 10 MB are supported.
 
-The bridge saves the original bytes under `uploads/` in `MOSHPIT_STATE_DIR`, with private file permissions. It includes the absolute file path in the agent's prompt so the agent can open the image on the host. Unsent drafts, including image files, persist in browser IndexedDB for recovery; the service worker does not cache uploads. Failed or uncertain sends retain the image and draft. Successful sends clear the submitted draft unless it has been edited in the meantime.
+The bridge saves the original bytes under `uploads/` in `MOSHPIT_STATE_DIR`, with private file permissions. It includes the absolute file path in the agent's prompt so the agent can open the image on the host. Unsent drafts, including image files, persist in browser IndexedDB for recovery. An attached image belongs to the session, so Chat and Terminal show the same one, while each view keeps its own text; the service worker does not cache uploads. Failed or uncertain sends retain the image and draft. Successful sends clear the submitted draft unless it has been edited in the meantime.
 
 Uploaded files remain on the host so an agent can read them later. Remove files from that upload directory when they are no longer needed. An agent's own file access permissions still apply.
 
