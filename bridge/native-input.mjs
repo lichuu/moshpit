@@ -25,6 +25,14 @@ export async function nativeCapabilities(agent) {
   return { inputModes: known ? pi ? ["send", "steer", "queue"] : ["send"] : [], stop: pi, fit: false };
 }
 
+// Typed text opens pi's completion list ("/model " lists models), and the
+// Enter that follows accepts its first row instead of submitting. Pasted
+// text opens no list. An end marker inside the text would close the paste
+// early, so it is dropped.
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+const paste = (text) => `${PASTE_START}${text.replaceAll(PASTE_END, "")}${PASTE_END}`;
+
 export async function submitNative({ run, bin, target, text, mode, agent }) {
   const capabilities = await nativeCapabilities(agent);
   if (mode !== "terminal" && mode !== "stop" && !capabilities.inputModes.includes(mode)) {
@@ -39,7 +47,7 @@ export async function submitNative({ run, bin, target, text, mode, agent }) {
   if (mode !== "terminal" && !text.trim()) reject("Write a message before sending.");
   if (typeof text !== "string") reject("Invalid message text.");
   if (text) {
-    await run(bin, ["pane", "send-text", String(target), text]);
+    await run(bin, ["pane", "send-text", String(target), agent.kind === "pi" ? paste(text) : text]);
     // Herdr's native agent.prompt uses the same gap for paste handling. Await
     // the delimiter here so another bridge write cannot overtake it.
     await delay(300);
