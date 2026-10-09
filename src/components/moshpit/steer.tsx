@@ -1,13 +1,15 @@
 import { Power, SquareTerminal } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Composer } from "@/components/moshpit/composer";
 import { Conversation } from "@/components/moshpit/conversation";
+import { NativePane } from "@/components/moshpit/native-pane";
+import { attachInteraction, hideInteraction, interactionKey, interactionStale, noteInteractionDelivery, showInteraction, useNativeInteraction, useRoomForTranscript } from "@/lib/moshpit/native-interaction";
 import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import { Button } from "@/components/ui/button";
 import { bridgeUrl } from "@/lib/moshpit/bridge";
 import { useSession } from "@/lib/moshpit/session";
-import { draftSessionId } from "@/lib/moshpit/drafts";
+import { draftSessionId, type DraftKey } from "@/lib/moshpit/drafts";
 import { askOptionKeys } from "@/lib/moshpit/ask-keys";
 import type {
   SessionEntry,
@@ -105,6 +107,35 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
   // The raw herdr session identity: the submission guard validates against it,
   // so the reader's hashed stream ID must not substitute here.
   const sessionId = agent?.sessionId ?? (agent && host?.demo ? draftSessionId(agent, true) : undefined);
+  const tick = useMoshpitStore((s) => s.tick);
+  const interactionId = connected && agent ? interactionKey(connected, agent.id) : undefined;
+  const interaction = useNativeInteraction(interactionId);
+  const paneOpen = Boolean(interaction?.visible);
+  // On a short screen the open pane takes the transcript's place. The reader
+  // keeps its position by session, so closing the pane returns to it.
+  const roomForTranscript = useRoomForTranscript();
+  const paneFills = paneOpen && !roomForTranscript;
+  const agentSessionId = agent?.sessionId;
+  // Stable identities: Composer is memo()'d, and these ride its props.
+  const togglePane = useCallback(() => {
+    if (!interactionId) return;
+    if (!interaction) attachInteraction(interactionId, agentSessionId);
+    else if (interaction.visible) { hideInteraction(interactionId); return; }
+    // A hidden panel whose pane moved on reattaches: asking for the pane is
+    // the explicit step, and what it shows is the session running now.
+    else if (interactionStale(interaction, agentSessionId)) attachInteraction(interactionId, agentSessionId);
+    else showInteraction(interactionId);
+    // Opening checks the pane's identity now, not at the next poll.
+    if (url) tick();
+  }, [interactionId, interaction, agentSessionId, tick, url]);
+  const nativePane = useMemo(() => ({ open: paneOpen, onToggle: togglePane }), [paneOpen, togglePane]);
+  // A delivered command can end or replace the session. The snapshot is read
+  // again at once, so a panel on the old session lets go without waiting.
+  const delivered = useCallback((requestId: string) => {
+    if (!interactionId) return;
+    noteInteractionDelivery(interactionId, requestId);
+    if (url) tick();
+  }, [interactionId, tick, url]);
 
   if (!connected || !agent) {
     return (
@@ -148,7 +179,7 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
           {session.error}. Reconnecting. Your loaded conversation is preserved.
         </p>
       )}
-      {available ? (
+      {paneFills ? null : available ? (
         <Conversation
           key={JSON.stringify([url || connected, available.sessionId])}
           sessionId={JSON.stringify([url || connected, available.sessionId])}
@@ -176,6 +207,7 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
             answerAgent(agent.id, askOptionKeys(agent.kind, question, optionIndex), onOutcome);
           }}
           onUseTerminal={() => setDetailView("terminal")}
+          nativePane={nativePane}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-4 overflow-auto px-6 py-8">
@@ -192,10 +224,23 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
           </Button>
         </div>
       )}
+      {interaction?.visible && interactionId && host && sessionId && (
+        <NativePane
+          agent={agent}
+          host={host}
+          hostUrl={url}
+          interactionId={interactionId}
+          record={interaction}
+          draftKey={[connected, sessionId, "conversation"] as DraftKey}
+          fill={paneFills}
+        />
+      )}
       {sessionId && (
         <Composer
           agent={agent}
           sessionId={sessionId}
+          nativePane={nativePane}
+          onDelivered={delivered}
           liveQuestion={agent.blockedDialog?.kind === "choose" && agent.blockedDialog.family === "claude-ask-user-review-v1"
             ? false
             : available?.entries.some((entry) => entry.kind === "question" && !entry.resolved)}

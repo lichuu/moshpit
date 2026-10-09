@@ -55,7 +55,7 @@ export type Action =
       text: string;
       attachment?: { name: string; type: string; data: string };
     }
-  | { kind: "keys"; target: string; keys: KeyInput | KeyInput[] }
+  | { kind: "keys"; target: string; keys: KeyInput | KeyInput[]; sessionId?: string }
   | { kind: "answer"; target: string; token: string; optionKey: string }
   | { kind: "start"; cwd: string; agentKind: string; model?: string; checkout?: { baseRef: string; branch: string } }
   | { kind: "open-shell"; cwd: string }

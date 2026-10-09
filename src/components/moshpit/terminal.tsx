@@ -12,6 +12,7 @@ import { useMoshpitStore } from "@/lib/moshpit/store";
 import { draftSessionId, draftStore } from "@/lib/moshpit/drafts";
 import { validateImage } from "@/lib/moshpit/image";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
+import { useMoreToRight } from "@/lib/moshpit/use-more-to-right";
 import { cn } from "@/lib/utils";
 import type { TermSize } from "@/lib/moshpit/types";
 
@@ -117,29 +118,6 @@ function DisplayOptions({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** True while the strip has keys past its right edge, for the fade. */
-function useMoreToRight(el: React.RefObject<HTMLDivElement | null>, active: boolean) {
-  const [more, setMore] = useState(false);
-  useEffect(() => {
-    const node = el.current;
-    if (!node || !active) {
-      setMore(false);
-      return;
-    }
-    const measure = () =>
-      setMore(node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
-    measure();
-    node.addEventListener("scroll", measure, { passive: true });
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => {
-      node.removeEventListener("scroll", measure);
-      observer.disconnect();
-    };
-  }, [el, active]);
-  return more;
-}
-
 function ShellView() {
   const startHerdr = useMoshpitStore((s) => s.startHerdr);
   const host = useMoshpitStore((s) =>
@@ -175,7 +153,7 @@ const PANE_LABEL: Record<PaneStatus["state"], string> = {
 };
 
 /** The pane's connection, said in words once it is anything but live. */
-function PaneStatusLabel({ status, shell, paneId }: { status: PaneStatus; shell: boolean; paneId: string }) {
+export function PaneStatusLabel({ status, shell, paneId }: { status: PaneStatus; shell: boolean; paneId: string }) {
   const live = status.state === "connected";
   const name = live && shell ? "Live shell PTY" : PANE_LABEL[status.state];
   const text =
