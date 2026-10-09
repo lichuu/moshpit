@@ -267,6 +267,27 @@ const KEY_NAMES = new Set([
   "esc", "escape", "tab", "shift+tab", "enter", "alt+enter", "return", "space", "backspace", "up", "down", "left", "right",
   ...Array.from({ length: 26 }, (_, i) => `ctrl+${String.fromCharCode(97 + i)}`),
 ]);
+
+// Keys herdr's send-keys refuses (delete, home, end, pageup, pagedown and
+// insert answer invalid_key) or that were never probed against it, sent as
+// xterm bytes through send-text, which carries them verbatim and in order.
+// This one table is what the bridge sends and what the tests expect. A name
+// outside it and KEY_NAMES is refused, never typed.
+const F_KEYS = ["\x1bOP", "\x1bOQ", "\x1bOR", "\x1bOS", "\x1b[15~", "\x1b[17~", "\x1b[18~", "\x1b[19~", "\x1b[20~", "\x1b[21~", "\x1b[23~", "\x1b[24~"];
+export const ESCAPE_KEYS = new Map([
+  ["delete", "\x1b[3~"], ["home", "\x1b[H"], ["end", "\x1b[F"],
+  ["pageup", "\x1b[5~"], ["pagedown", "\x1b[6~"], ["insert", "\x1b[2~"],
+  ...F_KEYS.map((bytes, i) => [`f${i + 1}`, bytes]),
+  // Modified arrows are CSI 1 ; <modifier> <A-D>, the modifier being 1 plus
+  // Shift 1, Alt 2 and Ctrl 4. Names list ctrl, alt, shift in that order.
+  ...[["up", "A"], ["down", "B"], ["right", "C"], ["left", "D"]].flatMap(([arrow, final]) =>
+    Array.from({ length: 7 }, (_, i) => {
+      const bits = i + 1;
+      const name = [bits & 4 && "ctrl", bits & 2 && "alt", bits & 1 && "shift", arrow].filter(Boolean).join("+");
+      return [name, `\x1b[1;${1 + bits}${final}`];
+    }),
+  ),
+]);
 export const MAX_TEXT_INPUT = 4096;
 
 export class KeyInputError extends Error {
@@ -279,7 +300,8 @@ export class KeyInputError extends Error {
 
 /**
  * What one input element sends: { kind: "keys" } for a named key, or
- * { kind: "text" } for literal text. Anything else throws KeyInputError, so a
+ * { kind: "text" } for literal text, or for a key sent as its escape bytes
+ * (those also carry `key`). Anything else throws KeyInputError, so a
  * refused element dispatches nothing.
  */
 export function herdrInput(raw) {
@@ -291,6 +313,7 @@ export function herdrInput(raw) {
   }
   if (typeof raw !== "string" || !raw) throw new KeyInputError("A key is a non-empty string or { text }.");
   if (KEY_NAMES.has(raw)) return { kind: "keys", value: raw };
+  if (ESCAPE_KEYS.has(raw)) return { kind: "text", value: ESCAPE_KEYS.get(raw), key: raw };
   if ([...raw].length !== 1) throw new KeyInputError(`${JSON.stringify(raw.slice(0, 32))} is not a key this bridge can send; send text as { text }.`);
   const c = raw.charCodeAt(0);
   if (c === 13 || c === 10) return { kind: "keys", value: "enter" };
@@ -567,7 +590,8 @@ function createDemoHerdr(onLine) {
       // Validated like the real bridge; literal text is echoed, never pressed.
       const input = herdrInput(raw);
       const name = input.kind === "keys" ? input.value : null;
-      const keys = input.value;
+      // A key sent as escape bytes is shown by name, not as raw bytes.
+      const keys = input.key ? `[${input.key}]` : input.value;
       const shell = shells.find((s) => s.id === target);
       if (shell) {
         const echo =

@@ -94,7 +94,133 @@ test("typing in a live terminal reaches the pane in order over HTTP", async ({ p
   expect(socketFrames, "nothing is typed over the socket").toEqual([]);
 });
 
-test("terminal picker, paste and drop deliver private images followed by Enter", async ({ page, bridge }, testInfo) => {
+// Real hardware key presses on the focused pane, through the parser, the key
+// queue, the HTTP action and the bridge, down to the exact herdr argv. The
+// named editing keys herdr's send-keys refuses go out as xterm bytes through
+// send-text; the rest keep their send-keys names.
+test("hardware editing, navigation, function and modified keys reach herdr as exact calls", async ({ page, bridge }) => {
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const pane = page.getByRole("application", { name: "Pane w1:p1" });
+  await pane.focus();
+
+  for (const press of [
+    "Home", "End", "Delete", "PageUp", "PageDown", "Insert",
+    "Control+ArrowLeft", "Alt+ArrowRight", "Shift+ArrowUp", "Control+Alt+Shift+ArrowDown",
+    "F2", "F9", "Shift+Tab", "Alt+Enter", "Tab", "ArrowUp",
+  ]) await page.keyboard.press(press);
+  await page.keyboard.type("ls");
+  await page.keyboard.press("Home");
+
+  const e = "\x1b";
+  const expected = [
+    ["pane", "send-text", "w1:p1", `${e}[H`],
+    ["pane", "send-text", "w1:p1", `${e}[F`],
+    ["pane", "send-text", "w1:p1", `${e}[3~`],
+    ["pane", "send-text", "w1:p1", `${e}[5~`],
+    ["pane", "send-text", "w1:p1", `${e}[6~`],
+    ["pane", "send-text", "w1:p1", `${e}[2~`],
+    ["pane", "send-text", "w1:p1", `${e}[1;5D`],
+    ["pane", "send-text", "w1:p1", `${e}[1;3C`],
+    ["pane", "send-text", "w1:p1", `${e}[1;2A`],
+    ["pane", "send-text", "w1:p1", `${e}[1;8B`],
+    ["pane", "send-text", "w1:p1", `${e}OQ`],
+    ["pane", "send-text", "w1:p1", `${e}[20~`],
+    ["pane", "send-keys", "w1:p1", "shift+tab"],
+    ["pane", "send-keys", "w1:p1", "alt+enter"],
+    ["pane", "send-keys", "w1:p1", "tab"],
+    ["pane", "send-keys", "w1:p1", "up"],
+    ["pane", "send-text", "w1:p1", "ls"],
+    ["pane", "send-text", "w1:p1", `${e}[H`],
+  ];
+  // The queue may send "l" and "s" as one text or two, so adjacent plain-text
+  // writes are joined before comparing; every key row must match one for one.
+  const joined = async () => {
+    const out: string[][] = [];
+    for (const write of await capturedWrites(host)) {
+      const plain = (row: string[]) => row[1] === "send-text" && !row[3].startsWith(e);
+      const last = out.at(-1);
+      if (last && plain(write) && plain(last)) last[3] += write[3];
+      else out.push([...write]);
+    }
+    return out;
+  };
+  await expect.poll(async () => (await joined()).length, { timeout: 15_000 }).toBe(expected.length);
+  expect(await joined()).toEqual(expected);
+  await expect(pane, "no key moved focus off the pane").toBeFocused();
+});
+
+test("an unsupported combination is refused with a toast and sends nothing", async ({ page, bridge }) => {
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const pane = page.getByRole("application", { name: "Pane w1:p1" });
+  await pane.focus();
+
+  // None of these has an encoding the pane would read as that combination;
+  // sending a plain Enter or Home instead would run or move something else.
+  await page.keyboard.press("Control+Enter");
+  await expect(page.getByText("Ctrl+Enter is not sent to the pane", { exact: true })).toBeVisible();
+  await page.keyboard.press("Shift+Home");
+  await expect(page.getByText("Shift+Home is not sent to the pane", { exact: true })).toBeVisible();
+  await page.keyboard.press("Shift+F5");
+  await expect(page.getByText("Shift+F5 is not sent to the pane", { exact: true })).toBeVisible();
+  await page.keyboard.press("Meta+ArrowUp");
+  await expect(page.getByText("Meta+ArrowUp is not sent to the pane", { exact: true })).toBeVisible();
+
+  // A supported key afterwards is the only call, so the refusals sent nothing.
+  await page.keyboard.press("End");
+  await expect.poll(async () => (await capturedWrites(host)).length).toBe(1);
+  expect(await capturedWrites(host)).toEqual([["pane", "send-text", "w1:p1", "\x1b[F"]]);
+});
+
+// Real copy and select-all on the pane belong to the browser: nothing is sent,
+// nothing is reported, and the copied text is what was selected.
+test("clipboard and selection shortcuts on the pane stay with the browser", async ({ page, bridge }) => {
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const pane = page.getByRole("application", { name: "Pane w1:p1" });
+  await pane.focus();
+
+  await pane.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element.querySelector("pre") as Element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  for (const press of ["ControlOrMeta+C", "ControlOrMeta+A", "ControlOrMeta+Insert", "Shift+Delete"]) await page.keyboard.press(press);
+  await page.waitForTimeout(500);
+  expect(await capturedWrites(host), "no clipboard or selection chord is sent").toEqual([]);
+  await expect(page.getByText(/is not sent to the pane/)).toHaveCount(0);
+});
+
+// IME input arrives as composition and input events on an editable target, not
+// as hardware keys: a real composition in the composer reaches neither the
+// pane parser nor herdr until it is submitted on purpose. A focused pane only
+// ever sees the placeholder key an IME emits ("Process").
+test("an IME composition in the composer sends nothing until it is submitted", async ({ page, bridge, browserName }) => {
+  test.skip(browserName !== "chromium", "drives the composition through the Chrome DevTools Protocol");
+  const host = await bridge({ herdr });
+  await openTerminal(page, host);
+  const input = page.getByRole("textbox", { name: "Terminal input" });
+  await input.focus();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+  await expect(input).toHaveValue("ni");
+  await cdp.send("Input.insertText", { text: "你好" });
+  await expect(input).toHaveValue("你好");
+  expect(await capturedWrites(host), "composing and committing type nothing into the pane").toEqual([]);
+
+  const pane = page.getByRole("application", { name: "Pane w1:p1" });
+  await pane.focus();
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Process", code: "KeyN", windowsVirtualKeyCode: 229 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Process", code: "KeyN", windowsVirtualKeyCode: 229 });
+  await page.waitForTimeout(300);
+  expect(await capturedWrites(host)).toEqual([]);
+  await expect(page.getByText(/is not sent to the pane/)).toHaveCount(0);
+});
+
+test("terminal picker, paste and drop deliver private images followed by Enter",async ({ page, bridge }, testInfo) => {
   const host = await bridge({ herdr });
   await openTerminal(page, host);
   const input = page.getByRole("textbox", { name: "Terminal input" });

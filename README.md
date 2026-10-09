@@ -24,7 +24,7 @@ Phones use bottom navigation and a Back button inside each agent. Tablets use th
 
 Chat includes session history, image attachments, saved drafts, snippets, command suggestions, and collapsible quick replies. It can show the agent's live pane in place, for the menu or prompt a command opens. Native dialog support is deliberately narrow: recognized Codex choices use the pane's printed keys; unsupported dialogs fall back to Terminal. Blocked text replies insert without pressing Enter.
 
-Terminal shows the pane's exact output, with a key bar for Esc, Ctrl combinations, Tab, and arrows, and an input line you can type or dictate into.
+Terminal shows the pane's exact output, with a key bar for Esc, Ctrl combinations, Tab, and arrows, and an input line you can type or dictate into. A hardware keyboard also sends Home, End, Delete, Page Up and Down, function keys and modified arrows to the focused pane.
 
 ![Terminal view with the key bar](docs/screenshots/desktop-terminal.png)
 
