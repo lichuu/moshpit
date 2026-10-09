@@ -258,20 +258,24 @@ test.describe("stable chat reading", () => {
     await expect(page.locator('[data-activity-id="x1"] summary')).toHaveText("Rancurl -sS http://localhost");
   });
 
-  test("a running tool line stands in for the Working indicator", async ({ page, bridge }) => {
+  test("Working sits above the turn's latest tool group and stays there", async ({ page, bridge }) => {
     const host = await bridge({ herdr });
     const live: Entry[] = [message("m1", "t1", 1), activity("a1", "t2", "running")];
     await serveSessions(page, host.url, { "w1:p1": live });
     await openReader(page, host.url, host.port);
 
     const working = page.getByRole("status").filter({ hasText: "Working" });
-    await expect(page.locator('details[data-entry-id="a1"] summary').first()).toHaveText("Running a1");
-    await expect(working).toHaveCount(0);
+    const group = page.locator('details[data-entry-id="a1"]');
+    const above = () => working.evaluate((el) => el.nextElementSibling?.getAttribute("data-entry-id"));
+    await expect(group.locator("summary").first()).toHaveText("Running a1");
+    await expect(working).toHaveCount(1);
+    expect(await above()).toBe("a1");
 
-    // Between tool calls the agent is still busy, and only Working says so.
+    // The line does not move when the tool finishes and the agent keeps going.
     live[1] = activity("a1", "t2", "complete");
-    await expect(page.locator('details[data-entry-id="a1"] summary').first()).toHaveText("Ran a command");
-    await expect(working).toBeVisible();
+    await expect(group.locator("summary").first()).toHaveText("Ran a command");
+    await expect(working).toHaveCount(1);
+    expect(await above()).toBe("a1");
   });
 
   test("search keeps its own position and expansion, and clearing it restores the reader", async ({ page, bridge }) => {

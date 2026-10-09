@@ -336,7 +336,7 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
                   controls to leave live mid-rename. */}
               {!renaming && (
                 <>
-                <StatusPill status={agent.status} className="shrink-0" />
+                <StatusPill status={agent.status} live className="shrink-0" />
                 {phone ? null : (
                   <>
                     <button

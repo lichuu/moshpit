@@ -19,9 +19,12 @@ const TONE: Record<AgentStatus, string> = {
 
 export function StatusPill({
   status,
+  live = false,
   className,
 }: {
   status: AgentStatus;
+  /** Blink the dot slowly while the agent is working. */
+  live?: boolean;
   className?: string;
 }) {
   return (
@@ -29,6 +32,7 @@ export function StatusPill({
       className={cn(
         "ear-tag inline-flex items-center pr-2 py-1 text-2xs font-medium",
         TONE[status],
+        live && status === "working" && "ear-tag-live",
         className,
       )}
     >
