@@ -501,5 +501,6 @@ test.describe("stable chat reading", () => {
       await expect(toggle(page, "hit")).toHaveAttribute("aria-expanded", "false");
       await expect(toggle(page, "kept-open")).toHaveAttribute("aria-expanded", "true");
     });
+
   });
 });

@@ -361,7 +361,7 @@ function UserMessage({ text, expanded, forced, onToggle, onCopy }: {
     <ClampedText id={textId} text={text} collapsed={!expanded} />
     <div className="mt-1 flex items-center gap-4">
       {/* Search forces the message open, so it has nothing to toggle there. */}
-      {!forced && <button type="button" aria-expanded={expanded} aria-controls={textId} onClick={() => onToggle(!expanded)} className="-ml-1 flex h-11 min-w-11 items-center gap-1 rounded-lg px-1 text-xs font-medium text-muted">
+      {!forced && <button type="button" aria-expanded={expanded} aria-controls={textId} onClick={() => onToggle(!expanded)} className="message-toggle -ml-1 flex h-11 min-w-11 items-center gap-1 rounded-lg px-1 text-xs font-medium text-muted">
         <ChevronDown className={cn("size-3.5", expanded && "rotate-180")} />
         {expanded ? "Show less" : "Show more"}
       </button>}

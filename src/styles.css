@@ -471,6 +471,9 @@ html[data-layout="wide"] .break-all {
 /* A collapsed long message shows about five lines. The fade only appears when
    the clamp hides something, and the half line at the foot says "continues". */
 .message-clamp[data-collapsed="true"] { max-height: 8.25rem; max-height: calc(5.5 * 1lh); overflow: hidden; }
+/* A message that is long by the rule but fits in the clamp on this screen has
+   nothing more to show, so it offers no toggle that would do nothing. */
+.message-clamp[data-collapsed="true"][data-clipped="false"] + div > .message-toggle { display: none; }
 .message-clamp[data-collapsed="true"][data-clipped="true"] {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5em), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5em), transparent);
