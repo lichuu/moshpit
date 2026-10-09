@@ -1377,7 +1377,7 @@ test("a key list is checked whole, and text is sent only when marked as text", {
   const { headers } = await authorize(bridge);
   const keys = (list) => bridge.request("/api/action", { method: "POST", headers, body: { kind: "keys", target: "pane-a", keys: list } });
 
-  for (const list of [["1", "home"], ["enter", "Enter"], ["Tabs (Recommended)", "enter"], [{ text: "" }]]) {
+  for (const list of [["1", "pgup"],["enter", "Enter"], ["Tabs (Recommended)", "enter"], [{ text: "" }]]) {
     const refused = await keys(list);
     assert.equal(refused.status, 400, JSON.stringify(list));
     assert.equal((await refused.json()).error.code, "key_unsupported");
@@ -1392,7 +1392,60 @@ test("a key list is checked whole, and text is sent only when marked as text", {
   ]);
 });
 
-test("diagnostics are schema-checked, bounded and rate limited per device", { timeout: 30000 }, async (t) => {
+// The matrix is shared with the browser parser test (tests/unit/modules.spec.ts).
+const KEY_MATRIX = JSON.parse(await readFile(new URL("../tests/fixtures/key-matrix.json", import.meta.url), "utf8"));
+
+test("every key in the shared matrix reaches herdr as its exact argv", { timeout: 60000 }, async (t) => {
+  const bridge = await startBridge(t);
+  const { headers } = await authorize(bridge);
+  const keys = (list) => bridge.request("/api/action", { method: "POST", headers, body: { kind: "keys", target: "pane-a", keys: list } });
+  const argv = (bridge_) => [bridge_.kind === "keys" ? "send-keys" : "send-text", "pane-a", bridge_.value];
+
+  const delivered = KEY_MATRIX.rows.filter((row) => row.bridge);
+  assert.ok(delivered.length > 60);
+  for (const row of delivered) {
+    const sent = await keys([row.parsed.value]);
+    assert.equal(sent.status, 200, row.name);
+  }
+  assert.deepEqual(
+    await bridge.mutations(),
+    delivered.map((row) => ["pane", ...argv(row.bridge)]),
+    "one exact herdr call per key, in order",
+  );
+});
+
+test("a mixed key batch keeps its order, and one unknown name sends nothing", { timeout: 30000 }, async (t) => {
+  const bridge = await startBridge(t);
+  const { headers } = await authorize(bridge);
+  const keys = (list) => bridge.request("/api/action", { method: "POST", headers, body: { kind: "keys", target: "pane-a", keys: list } });
+
+  const sent = await keys([{ text: "ls" }, "home", "enter", "ctrl+left", "f5", "delete", "shift+tab", "pagedown", "alt+enter", "end"]);
+  assert.equal(sent.status, 200);
+  assert.deepEqual(await bridge.mutations(), [
+    ["pane", "send-text", "pane-a", "ls"],
+    ["pane", "send-text", "pane-a", "\x1b[H"],
+    ["pane", "send-keys", "pane-a", "enter"],
+    ["pane", "send-text", "pane-a", "\x1b[1;5D"],
+    ["pane", "send-text", "pane-a", "\x1b[15~"],
+    ["pane", "send-text", "pane-a", "\x1b[3~"],
+    ["pane", "send-keys", "pane-a", "shift+tab"],
+    ["pane", "send-text", "pane-a", "\x1b[6~"],
+    ["pane", "send-keys", "pane-a", "alt+enter"],
+    ["pane", "send-text", "pane-a", "\x1b[F"],
+  ]);
+
+  // An unrecognised name is refused, not typed, and the keys before it are
+  // not half-delivered.
+  const before = (await bridge.mutations()).length;
+  for (const name of KEY_MATRIX.unknown) {
+    const refused = await keys(["home", "enter", name, "f1"]);
+    assert.equal(refused.status, 400, name);
+    assert.equal((await refused.json()).error.code, "key_unsupported", name);
+  }
+  assert.equal((await bridge.mutations()).length, before, "no refused list reached herdr");
+});
+
+test("diagnostics are schema-checked, bounded and rate limited per device",{ timeout: 30000 }, async (t) => {
   const bridge = await startBridge(t);
   const { headers } = await authorize(bridge);
   const post = (body) => bridge.request("/api/log", { method: "POST", headers, body });

@@ -1,0 +1,1464 @@
+{
+ "rows": [
+  {
+   "name": "Tab",
+   "event": {
+    "key": "Tab"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "\t"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "tab"
+   }
+  },
+  {
+   "name": "Shift+Tab",
+   "event": {
+    "key": "Tab",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "shift+tab"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "shift+tab"
+   }
+  },
+  {
+   "name": "Enter",
+   "event": {
+    "key": "Enter"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "\r"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "enter"
+   }
+  },
+  {
+   "name": "Alt+Enter",
+   "event": {
+    "key": "Enter",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+enter"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "alt+enter"
+   }
+  },
+  {
+   "name": "Backspace",
+   "event": {
+    "key": "Backspace"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": ""
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "backspace"
+   }
+  },
+  {
+   "name": "Escape",
+   "event": {
+    "key": "Escape"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "\u001b"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "esc"
+   }
+  },
+  {
+   "name": "ArrowUp",
+   "event": {
+    "key": "ArrowUp"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "up"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "up"
+   }
+  },
+  {
+   "name": "ArrowDown",
+   "event": {
+    "key": "ArrowDown"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "down"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "down"
+   }
+  },
+  {
+   "name": "ArrowLeft",
+   "event": {
+    "key": "ArrowLeft"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "left"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "left"
+   }
+  },
+  {
+   "name": "ArrowRight",
+   "event": {
+    "key": "ArrowRight"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "right"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "right"
+   }
+  },
+  {
+   "name": "Ctrl+b",
+   "event": {
+    "key": "b",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "\u0002"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "ctrl+b"
+   }
+  },
+  {
+   "name": "Ctrl+d",
+   "event": {
+    "key": "d",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "\u0004"
+   },
+   "bridge": {
+    "kind": "keys",
+    "value": "ctrl+d"
+   }
+  },
+  {
+   "name": "letter",
+   "event": {
+    "key": "a"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "a"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "a"
+   }
+  },
+  {
+   "name": "Shift+letter",
+   "event": {
+    "key": "A",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "A"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "A"
+   }
+  },
+  {
+   "name": "symbol",
+   "event": {
+    "key": "~",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "~"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "~"
+   }
+  },
+  {
+   "name": "Delete",
+   "event": {
+    "key": "Delete"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "delete"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[3~"
+   }
+  },
+  {
+   "name": "Home",
+   "event": {
+    "key": "Home"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "home"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[H"
+   }
+  },
+  {
+   "name": "End",
+   "event": {
+    "key": "End"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "end"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[F"
+   }
+  },
+  {
+   "name": "PageUp",
+   "event": {
+    "key": "PageUp"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "pageup"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[5~"
+   }
+  },
+  {
+   "name": "PageDown",
+   "event": {
+    "key": "PageDown"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "pagedown"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[6~"
+   }
+  },
+  {
+   "name": "Insert",
+   "event": {
+    "key": "Insert"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "insert"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[2~"
+   }
+  },
+  {
+   "name": "F1",
+   "event": {
+    "key": "F1"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f1"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001bOP"
+   }
+  },
+  {
+   "name": "F2",
+   "event": {
+    "key": "F2"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f2"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001bOQ"
+   }
+  },
+  {
+   "name": "F3",
+   "event": {
+    "key": "F3"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f3"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001bOR"
+   }
+  },
+  {
+   "name": "F4",
+   "event": {
+    "key": "F4"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f4"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001bOS"
+   }
+  },
+  {
+   "name": "F5",
+   "event": {
+    "key": "F5"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f5"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[15~"
+   }
+  },
+  {
+   "name": "F6",
+   "event": {
+    "key": "F6"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f6"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[17~"
+   }
+  },
+  {
+   "name": "F7",
+   "event": {
+    "key": "F7"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f7"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[18~"
+   }
+  },
+  {
+   "name": "F8",
+   "event": {
+    "key": "F8"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f8"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[19~"
+   }
+  },
+  {
+   "name": "F9",
+   "event": {
+    "key": "F9"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f9"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[20~"
+   }
+  },
+  {
+   "name": "F10",
+   "event": {
+    "key": "F10"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f10"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[21~"
+   }
+  },
+  {
+   "name": "F11",
+   "event": {
+    "key": "F11"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f11"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[23~"
+   }
+  },
+  {
+   "name": "F12",
+   "event": {
+    "key": "F12"
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "f12"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[24~"
+   }
+  },
+  {
+   "name": "Ctrl+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;5A"
+   }
+  },
+  {
+   "name": "Alt+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;3A"
+   }
+  },
+  {
+   "name": "Shift+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "shift+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;2A"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "ctrlKey": true,
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;7A"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+shift+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;6A"
+   }
+  },
+  {
+   "name": "Alt+Shift+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+shift+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;4A"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+Shift+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "ctrlKey": true,
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+shift+up"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;8A"
+   }
+  },
+  {
+   "name": "Ctrl+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;5B"
+   }
+  },
+  {
+   "name": "Alt+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;3B"
+   }
+  },
+  {
+   "name": "Shift+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "shift+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;2B"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "ctrlKey": true,
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;7B"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+shift+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;6B"
+   }
+  },
+  {
+   "name": "Alt+Shift+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+shift+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;4B"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+Shift+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "ctrlKey": true,
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+shift+down"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;8B"
+   }
+  },
+  {
+   "name": "Ctrl+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;5C"
+   }
+  },
+  {
+   "name": "Alt+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;3C"
+   }
+  },
+  {
+   "name": "Shift+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "shift+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;2C"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "ctrlKey": true,
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;7C"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+shift+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;6C"
+   }
+  },
+  {
+   "name": "Alt+Shift+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+shift+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;4C"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+Shift+ArrowRight",
+   "event": {
+    "key": "ArrowRight",
+    "ctrlKey": true,
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+shift+right"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;8C"
+   }
+  },
+  {
+   "name": "Ctrl+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;5D"
+   }
+  },
+  {
+   "name": "Alt+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;3D"
+   }
+  },
+  {
+   "name": "Shift+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "shift+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;2D"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "ctrlKey": true,
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;7D"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+shift+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;6D"
+   }
+  },
+  {
+   "name": "Alt+Shift+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "alt+shift+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;4D"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+Shift+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "ctrlKey": true,
+    "altKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "deliver",
+    "value": "ctrl+alt+shift+left"
+   },
+   "bridge": {
+    "kind": "text",
+    "value": "\u001b[1;8D"
+   }
+  },
+  {
+   "name": "Meta+ArrowUp",
+   "event": {
+    "key": "ArrowUp",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Meta+ArrowUp"
+   }
+  },
+  {
+   "name": "Ctrl+Meta+ArrowLeft",
+   "event": {
+    "key": "ArrowLeft",
+    "ctrlKey": true,
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Meta+ArrowLeft"
+   }
+  },
+  {
+   "name": "Alt+Meta+ArrowDown",
+   "event": {
+    "key": "ArrowDown",
+    "altKey": true,
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+Meta+ArrowDown"
+   }
+  },
+  {
+   "name": "Shift+Enter",
+   "event": {
+    "key": "Enter",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Shift+Enter"
+   }
+  },
+  {
+   "name": "Ctrl+Enter",
+   "event": {
+    "key": "Enter",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Enter"
+   }
+  },
+  {
+   "name": "Meta+Enter",
+   "event": {
+    "key": "Enter",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Meta+Enter"
+   }
+  },
+  {
+   "name": "Ctrl+Alt+Enter",
+   "event": {
+    "key": "Enter",
+    "ctrlKey": true,
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Alt+Enter"
+   }
+  },
+  {
+   "name": "Ctrl+Tab",
+   "event": {
+    "key": "Tab",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Tab"
+   }
+  },
+  {
+   "name": "Alt+Tab",
+   "event": {
+    "key": "Tab",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+Tab"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+Tab",
+   "event": {
+    "key": "Tab",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Shift+Tab"
+   }
+  },
+  {
+   "name": "Ctrl+Backspace",
+   "event": {
+    "key": "Backspace",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Backspace"
+   }
+  },
+  {
+   "name": "Alt+Backspace",
+   "event": {
+    "key": "Backspace",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+Backspace"
+   }
+  },
+  {
+   "name": "Shift+Escape",
+   "event": {
+    "key": "Escape",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Shift+Escape"
+   }
+  },
+  {
+   "name": "Shift+Home",
+   "event": {
+    "key": "Home",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Shift+Home"
+   }
+  },
+  {
+   "name": "Ctrl+Home",
+   "event": {
+    "key": "Home",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Home"
+   }
+  },
+  {
+   "name": "Alt+End",
+   "event": {
+    "key": "End",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+End"
+   }
+  },
+  {
+   "name": "Ctrl+PageUp",
+   "event": {
+    "key": "PageUp",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+PageUp"
+   }
+  },
+  {
+   "name": "Shift+PageDown",
+   "event": {
+    "key": "PageDown",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Shift+PageDown"
+   }
+  },
+  {
+   "name": "Ctrl+Delete",
+   "event": {
+    "key": "Delete",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Delete"
+   }
+  },
+  {
+   "name": "Alt+Delete",
+   "event": {
+    "key": "Delete",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+Delete"
+   }
+  },
+  {
+   "name": "Alt+Insert",
+   "event": {
+    "key": "Insert",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+Insert"
+   }
+  },
+  {
+   "name": "Shift+F1",
+   "event": {
+    "key": "F1",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Shift+F1"
+   }
+  },
+  {
+   "name": "Ctrl+F5",
+   "event": {
+    "key": "F5",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+F5"
+   }
+  },
+  {
+   "name": "Alt+F12",
+   "event": {
+    "key": "F12",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+F12"
+   }
+  },
+  {
+   "name": "F13",
+   "event": {
+    "key": "F13"
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "F13"
+   }
+  },
+  {
+   "name": "F24",
+   "event": {
+    "key": "F24"
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "F24"
+   }
+  },
+  {
+   "name": "Alt+a",
+   "event": {
+    "key": "a",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Alt+a"
+   }
+  },
+  {
+   "name": "Ctrl+Shift+b",
+   "event": {
+    "key": "b",
+    "ctrlKey": true,
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+Shift+b"
+   }
+  },
+  {
+   "name": "Ctrl+1",
+   "event": {
+    "key": "1",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "unsupported",
+    "label": "Ctrl+1"
+   }
+  },
+  {
+   "name": "Ctrl+c",
+   "event": {
+    "key": "c",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Ctrl+v",
+   "event": {
+    "key": "v",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Ctrl+x",
+   "event": {
+    "key": "x",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Ctrl+a",
+   "event": {
+    "key": "a",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Meta+c",
+   "event": {
+    "key": "c",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Meta+v",
+   "event": {
+    "key": "v",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Meta+a",
+   "event": {
+    "key": "a",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Ctrl+Insert",
+   "event": {
+    "key": "Insert",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Shift+Insert",
+   "event": {
+    "key": "Insert",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "Shift+Delete",
+   "event": {
+    "key": "Delete",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "composing Enter",
+   "event": {
+    "key": "Enter",
+    "nativeEvent": {
+     "isComposing": true
+    }
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "composing letter",
+   "event": {
+    "key": "a",
+    "nativeEvent": {
+     "isComposing": true
+    }
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "composing Home",
+   "event": {
+    "key": "Home",
+    "nativeEvent": {
+     "isComposing": true
+    }
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "bare Shift",
+   "event": {
+    "key": "Shift",
+    "shiftKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "bare Control",
+   "event": {
+    "key": "Control",
+    "ctrlKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "bare Alt",
+   "event": {
+    "key": "Alt",
+    "altKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "bare Meta",
+   "event": {
+    "key": "Meta",
+    "metaKey": true
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "unmapped key",
+   "event": {
+    "key": "CapsLock"
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "IME placeholder Process",
+   "event": {
+    "key": "Process"
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "IME placeholder Dead",
+   "event": {
+    "key": "Dead"
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "name": "IME placeholder Unidentified",
+   "event": {
+    "key": "Unidentified"
+   },
+   "parsed": {
+    "kind": "ignore"
+   }
+  }
+ ],
+ "unknown": [
+  "Home",
+  "Delete",
+  "F1",
+  "f0",
+  "f13",
+  "ctrl+enter",
+  "meta+up",
+  "ctrl+home",
+  "shift+home",
+  "pgup",
+  "page_up",
+  "ctrl+f1",
+  "ctrl+up+shift",
+  "shift+ctrl+up",
+  "up ",
+  "Up"
+ ]
+}

@@ -1032,6 +1032,17 @@ terminal_device_limit`, `503 terminal_limit`). A socket message over
 64 KiB closes with 1009, binary input with 1003, and a viewer that falls
 more than 256 KiB behind closes with 1013.
 
+With a hardware keyboard, a focused terminal pane sends Home, End, Delete,
+PageUp, PageDown, Insert, F1 to F12, Shift+Tab, Alt+Enter and the arrows with
+any mix of Ctrl, Alt and Shift. Copy, cut, paste, select-all and the Insert and
+Delete clipboard chords stay with the browser. Any other modifier combination
+(Ctrl+Enter, Meta+Arrow, Shift+F5 and the like) is not sent: a toast says
+`<keys> is not sent to the pane` rather than sending a different key. Keys
+`herdr pane send-keys` refuses, and the function and modified-arrow keys, go
+out as xterm escape sequences through `pane send-text`, from one table in
+`bridge/herdr.mjs`. A bridge older than this table answers an unknown key name
+with `400 key_unsupported`, and the pane shows `Keys not sent`.
+
 ## Push
 
 Notifications flow through the bridge, which sends them itself with the

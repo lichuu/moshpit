@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { DEV_URL } from "../../playwright.config";
 
@@ -406,81 +407,49 @@ test.describe("chat markdown links", () => {
   });
 });
 
-test.describe("pane keys", () => {
-  test("Shift+Tab is named and Home is reported, not typed", async ({ page }) => {
-    await page.goto(`${DEV_URL}/`);
-    const result = await page.evaluate(async (mod) => {
-      const { parsePaneKey } = await import(mod);
-      const event = (partial: Record<string, unknown>) => ({
-        key: "",
-        shiftKey: false,
-        ctrlKey: false,
-        altKey: false,
-        metaKey: false,
-        ...partial,
-      });
-      return {
-        tab: parsePaneKey(event({ key: "Tab" })),
-        shiftTab: parsePaneKey(event({ key: "Tab", shiftKey: true })),
-        home: parsePaneKey(event({ key: "Home" })),
-        copy: parsePaneKey(event({ key: "c", ctrlKey: true, metaKey: false })),
-        letter: parsePaneKey(event({ key: "a" })),
-      };
-    }, KEYS);
-    expect(result.tab).toEqual({ kind: "deliver", value: "\t" });
-    expect(result.shiftTab).toEqual({ kind: "deliver", value: "shift+tab" });
-    expect(result.home).toEqual({ kind: "unsupported", label: "Home" });
-    expect(result.copy).toEqual({ kind: "ignore" });
-    expect(result.letter).toEqual({ kind: "deliver", value: "a" });
-  });
+// One matrix drives this parser test and the bridge tests: the browser event,
+// what parsePaneKey reports, and what the bridge then sends.
+type MatrixRow = { name: string; event: Record<string, unknown>; parsed: unknown; bridge?: { kind: string; value: string } };
+const matrix: { rows: MatrixRow[]; unknown: string[] } = JSON.parse(
+  readFileSync(new URL("../fixtures/key-matrix.json", import.meta.url), "utf8"),
+);
 
+test.describe("pane keys", () => {
   // An unsupported modifier combination must be reported, never silently
   // weakened into a different key. Ctrl+Enter delivering a bare \r submits
   // whatever the agent had staged.
-  test("a modifier combination is never reduced to a different operation", async ({ page }) => {
-    const matrix: [string, Record<string, unknown>, unknown][] = [
-      ["Ctrl+ArrowUp", { key: "ArrowUp", ctrlKey: true }, { kind: "unsupported", label: "Ctrl+ArrowUp" }],
-      ["Shift+Enter", { key: "Enter", shiftKey: true }, { kind: "unsupported", label: "Shift+Enter" }],
-      ["Ctrl+Enter", { key: "Enter", ctrlKey: true }, { kind: "unsupported", label: "Ctrl+Enter" }],
-      ["Meta+Enter", { key: "Enter", metaKey: true }, { kind: "unsupported", label: "Meta+Enter" }],
-      ["Ctrl+Tab", { key: "Tab", ctrlKey: true }, { kind: "unsupported", label: "Ctrl+Tab" }],
-      ["Ctrl+Backspace", { key: "Backspace", ctrlKey: true }, { kind: "unsupported", label: "Ctrl+Backspace" }],
-      ["Alt+Backspace", { key: "Backspace", altKey: true }, { kind: "unsupported", label: "Alt+Backspace" }],
-      ["Tab", { key: "Tab" }, { kind: "deliver", value: "\t" }],
-      ["Shift+Tab", { key: "Tab", shiftKey: true }, { kind: "deliver", value: "shift+tab" }],
-      ["Enter", { key: "Enter" }, { kind: "deliver", value: "\r" }],
-      ["Alt+Enter", { key: "Enter", altKey: true }, { kind: "deliver", value: "alt+enter" }],
-      ["Backspace", { key: "Backspace" }, { kind: "deliver", value: "\x7f" }],
-      ["Escape", { key: "Escape" }, { kind: "deliver", value: "\x1b" }],
-      ["ArrowUp", { key: "ArrowUp" }, { kind: "deliver", value: "up" }],
-      ["Shift+ArrowUp", { key: "ArrowUp", shiftKey: true }, { kind: "unsupported", label: "Shift+ArrowUp" }],
-      ["Ctrl+c", { key: "c", ctrlKey: true }, { kind: "ignore" }],
-      ["Ctrl+v", { key: "v", ctrlKey: true }, { kind: "ignore" }],
-      ["Ctrl+b", { key: "b", ctrlKey: true }, { kind: "deliver", value: "\x02" }],
-      ["letter", { key: "a" }, { kind: "deliver", value: "a" }],
-      ["Shift+letter", { key: "A", shiftKey: true }, { kind: "deliver", value: "A" }],
-      ["Delete", { key: "Delete" }, { kind: "unsupported", label: "Delete" }],
-      ["composing", { key: "Enter", nativeEvent: { isComposing: true } }, { kind: "ignore" }],
-      // Holding a modifier down is not an unsupported combination; reporting
-      // one toasts every time the user reaches for Ctrl.
-      ["bare Shift", { key: "Shift", shiftKey: true }, { kind: "ignore" }],
-      ["bare Control", { key: "Control", ctrlKey: true }, { kind: "ignore" }],
-      ["bare Alt", { key: "Alt", altKey: true }, { kind: "ignore" }],
-      ["bare Meta", { key: "Meta", metaKey: true }, { kind: "ignore" }],
-    ];
+  test("every browser event in the matrix parses to its normalised key, or is refused", async ({ page }) => {
     await page.goto(`${DEV_URL}/`);
     const actual = await page.evaluate(
       async ([mod, rows]) => {
         const { parsePaneKey } = await import(mod as string);
-        return (rows as [string, Record<string, unknown>, unknown][]).map(([, partial]) =>
-          parsePaneKey({ key: "", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...partial }),
+        return (rows as { event: Record<string, unknown> }[]).map(({ event }) =>
+          parsePaneKey({ key: "", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...event }),
         );
       },
-      [KEYS, matrix] as const,
+      [KEYS, matrix.rows] as const,
     );
-    expect(Object.fromEntries(matrix.map(([name], i) => [name, actual[i]]))).toEqual(
-      Object.fromEntries(matrix.map(([name, , expected]) => [name, expected])),
+    expect(Object.fromEntries(matrix.rows.map(({ name }, i) => [name, actual[i]]))).toEqual(
+      Object.fromEntries(matrix.rows.map(({ name, parsed }) => [name, parsed])),
     );
+  });
+
+  test("a delivered key is always a name the bridge sends, and a refused one never reaches it", async () => {
+    // The parser's name is the bridge's input: every delivered row must carry
+    // the bridge operation it expects, and no other row may.
+    for (const row of matrix.rows) {
+      const delivered = (row.parsed as { kind: string }).kind === "deliver";
+      expect(Boolean(row.bridge), row.name).toBe(delivered);
+    }
+  });
+
+  test("the matrix covers the named editing, navigation and function keys", async () => {
+    const delivered = new Set(matrix.rows.filter((row) => row.bridge).map((row) => row.name));
+    for (const name of [
+      "Delete", "Home", "End", "PageUp", "PageDown", "Insert", "Shift+Tab", "Alt+Enter",
+      "Ctrl+ArrowUp", "Alt+ArrowLeft", "Shift+ArrowDown", "Ctrl+Shift+ArrowRight",
+      ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+    ]) expect(delivered.has(name), name).toBe(true);
   });
 });
 
@@ -759,5 +728,14 @@ test.describe("terminal key queue", () => {
     expect(result.cap).toBe(16);
     // A text run stops at the bridge's 4096-character cap and starts a new one.
     expect(result.long).toEqual([{ text: "a".repeat(4096) }, { text: "a" }]);
+  });
+
+  test("named keys keep their place between typed runs", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const batch = await page.evaluate(async (mod) => {
+      const { nextBatch } = await import(mod);
+      return nextBatch(["a", "b", "home", "c", "ctrl+left", "f5", "delete", "d"]);
+    }, KEY_QUEUE);
+    expect(batch).toEqual([{ text: "ab" }, "home", { text: "c" }, "ctrl+left", "f5", "delete", { text: "d" }]);
   });
 });
