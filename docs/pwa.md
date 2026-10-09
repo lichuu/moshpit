@@ -1138,6 +1138,8 @@ Recognized live Codex choose cards can be answered in Chat. Only the current que
 
 While a recognized choose dialog owns the keyboard, ordinary composer sends and quick replies are refused. For an unread blocked dialog, sending text only types it into the pane. **Typed without submitting** exposes Enter and Esc for an explicit next action; inspect the pane before using either. Inbox's **Type y** and **Type n** controls follow the same insert-only rule, rather than claiming to approve or deny.
 
+A command can open a menu or a prompt in the agent's pane. **Pane**, beside the search field, shows that live pane inside Chat, and a delivered message offers **Show pane** next to its receipt. The key row under it sends arrows, Enter, Esc, Tab and Backspace to the pane; the composer keeps sending messages. Closing the pane only hides it and sends nothing, so whatever runs there keeps running. If the pane starts a different session, the panel lets go and asks you to reattach before it sends anything. On a short screen the pane takes the transcript's place until you close it.
+
 Expand **Quick replies** above the composer for fixed phrases. These send through the existing submission path without consuming your saved draft or attachment. They are not snippets: saved snippets insert into the draft without sending. Voice input uses browser speech recognition when supported and enabled in Hosts; it is not a native or guaranteed-offline dictation service.
 
 ## Commands and snippets

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, Check, ChevronRight, Copy, Search } from "lucide-react";
+import { ArrowDown, Check, ChevronRight, Copy, Search, SquareTerminal } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import ChatMarkdown from "./chat-markdown";
@@ -377,7 +377,9 @@ function ActivityGroup({ id, activities, search, reading, onCopy }: {
   </details>;
 }
 
-export function Conversation({ sessionId, epoch = 0, entries, working, before, loadOlder, loadingOlder, dialog, blocked, onAnswer, onUseTerminal }: {
+export function Conversation({ sessionId, epoch = 0, entries, working, before, loadOlder, loadingOlder, dialog, blocked, onAnswer, onUseTerminal, nativePane }: {
+  /** The toggle for the agent's live pane shown inside Chat. */
+  nativePane?: { open: boolean; onToggle: () => void };
   sessionId: string; epoch?: number; entries: SessionEntry[]; working: boolean; before: string | null; loadOlder: () => void; loadingOlder: boolean;
   dialog?: BlockedDialog;
   blocked?: boolean;
@@ -465,10 +467,16 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
   const trailing = showWorking && groups.at(-1)?.activities.length ? groups.length - 1 : -1;
   const workingLine = <p role="status" className="flex items-center gap-2 text-sm text-muted"><span className="size-1.5 rounded-full bg-working motion-blink" /> Working</p>;
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-    <label className="mx-4 mt-2 flex shrink-0 items-center gap-2 text-muted">
-      <Search className="size-4" />
-      <input aria-label="Search conversation" placeholder="Search loaded history" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none" />
-    </label>
+    <div className="mx-4 mt-2 flex shrink-0 items-center gap-2 text-muted">
+      <label className="flex min-w-0 flex-1 items-center gap-2">
+        <Search className="size-4 shrink-0" />
+        <input aria-label="Search conversation" placeholder="Search loaded history" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+      </label>
+      {nativePane && <button type="button" aria-label={nativePane.open ? "Hide native pane" : "Show native pane"} aria-pressed={nativePane.open} title="The agent's live pane, for menus and prompts a command opens" onClick={nativePane.onToggle} className={cn("flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium shadow-border", nativePane.open ? "bg-surface-2 text-fg" : "text-muted")}>
+        <SquareTerminal className="size-4" />
+        Pane
+      </button>}
+    </div>
     <div ref={scroll} className="conversation min-h-0 flex-1 overflow-y-auto" onLoadCapture={() => {
       if (scroll.current) applyReading(scroll.current, reading.current, { search: Boolean(search), contentChanged: false, prepending: false, previousHeight: 0 }, setUnseen);
     }} onWheel={userScroll} onTouchStart={userScroll} onPointerDown={userScroll} onKeyDown={userScroll} onScroll={(event) => {

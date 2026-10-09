@@ -174,8 +174,15 @@ export function createSubmissions({ stateDir, herdr, prepareAttachment, canonica
       void operation.finally(() => pending.delete(request.id)).catch(() => {});
       return operation;
     },
-    write(target, keys, authorize) {
-      return inLane(target, () => herdr.keys(target, keys), authorize);
+    write(target, keys, authorize, sessionId) {
+      return inLane(target, async () => {
+        if (sessionId !== undefined) {
+          const snapshot = await herdr.snapshot();
+          const agent = snapshot.agents.find((candidate) => candidate.id === target);
+          if (agent?.sessionId !== sessionId) throw new RequestError(409, "This agent session changed. No keys were sent.", "session_changed");
+        }
+        return herdr.keys(target, keys);
+      }, authorize);
     },
     prompt(target, text, authorize) {
       return inLane(target, () => herdr.submit(target, text, "send"), authorize);

@@ -116,8 +116,14 @@ const sanitize = (error: unknown) =>
   (error instanceof Error ? error.message : typeof error === "string" ? error : "Connection failed")
     .replace(/\s+/g, " ").slice(0, 120);
 
-export function PaneSurface({ target, label, demoLines, linkKey, handle, fallbackSend, onStatus, onFocusChange, onSwipe, onTransfer, autoFocus }: {
+export function PaneSurface({ target, bindSession = false, label, demoLines, linkKey, handle, fallbackSend, onStatus, onFocusChange, onSwipe, onTransfer, autoFocus }: {
   target: PaneTarget;
+  /**
+   * Sends the target's native session with every key, so the bridge refuses
+   * keys once the pane runs a different session. Terminal leaves it off: it
+   * follows the pane whatever runs there.
+   */
+  bindSession?: boolean;
   label: string;
   /** The demo host's seeded output, shown instead of a stream. */
   demoLines?: string[];
@@ -154,9 +160,10 @@ export function PaneSurface({ target, label, demoLines, linkKey, handle, fallbac
   const catcher = useRef<HTMLTextAreaElement | null>(null);
   const sendRef = useRef<(key: string) => boolean>(() => false);
   // Callbacks change identity every wrapper render; the connection must not.
-  const latest = useRef({ onStatus, linkKey, fallbackSend });
+  const boundSessionId = bindSession ? target.nativeSessionId : undefined;
+  const latest = useRef({ onStatus, linkKey, fallbackSend, boundSessionId });
   useLayoutEffect(() => {
-    latest.current = { onStatus, linkKey, fallbackSend };
+    latest.current = { onStatus, linkKey, fallbackSend, boundSessionId };
   });
 
   const { url, paneId, hostId } = target;
@@ -234,7 +241,8 @@ export function PaneSurface({ target, label, demoLines, linkKey, handle, fallbac
     // yet sent, and they are never replayed on return.
     const makeQueue = () => createKeyQueue(
       async (keys) => {
-        await postAction(url, { kind: "keys", target: paneId, keys });
+        const sessionId = latest.current.boundSessionId;
+        await postAction(url, sessionId ? { kind: "keys", target: paneId, keys, sessionId } : { kind: "keys", target: paneId, keys });
       },
       (error) => toast("Keys not sent", { description: error instanceof Error ? error.message : String(error) }),
     );
