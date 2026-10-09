@@ -160,27 +160,29 @@ test.describe("context meter", () => {
     await expect(limits).toHaveCount(0);
   });
 
-  test("the detail header carries it, and the agent card only past amber", async ({ page, bridge }, testInfo) => {
+  test("the detail header and the agent card carry it only past amber", async ({ page, bridge }, testInfo) => {
     const host = await bridge({ herdr });
     const contexts: Record<string, Context> = { "w1:p1": { used: 40_000, capacity: 100_000 } };
     await serveSessions(page, host.url, contexts);
     await openReader(page, host.url, host.port);
 
     const header = page.locator("section > header");
-    await expect(header.getByRole("meter", { name: "Context use" })).toHaveAttribute("aria-valuenow", "40");
     const card = page.locator(".agent-card", { hasText: "reader" });
-    if (!isPhone(testInfo)) {
-      await expect(card.getByRole("meter")).toHaveCount(0);
-      contexts["w1:p1"] = { used: 80_000, capacity: 100_000 };
-      await expect(card.getByRole("meter", { name: "Context use" })).toHaveAttribute("data-level", "warn");
-      contexts["w1:p1"] = { used: 95_000 };
-      // Tokens alone have no threshold to be past.
-      await expect(header).toContainText("95k tokens");
-      await expect(card.getByRole("meter")).toHaveCount(0);
-      await expect(card).not.toContainText("tokens");
-    } else {
-      contexts["w1:p1"] = { used: 95_000 };
-      await expect(header).toContainText("95k tokens");
-    }
+    // The composer shows the everyday figure; the header and card stay quiet.
+    await expect(page.locator(".composer-meter")).toContainText("40%");
+    await expect(header.getByRole("meter")).toHaveCount(0);
+    if (!isPhone(testInfo)) await expect(card.getByRole("meter")).toHaveCount(0);
+
+    contexts["w1:p1"] = { used: 80_000, capacity: 100_000 };
+    await expect(header.getByRole("meter", { name: "Context use" })).toHaveAttribute("data-level", "warn");
+    await expect(header.getByRole("meter", { name: "Context use" })).toHaveAttribute("aria-valuenow", "80");
+    if (!isPhone(testInfo)) await expect(card.getByRole("meter", { name: "Context use" })).toHaveAttribute("data-level", "warn");
+
+    // Tokens alone have no threshold to be past.
+    contexts["w1:p1"] = { used: 95_000 };
+    await expect(page.locator(".composer-meter")).toContainText("95k tokens");
+    await expect(header.getByRole("meter")).toHaveCount(0);
+    await expect(header).not.toContainText("tokens");
+    if (!isPhone(testInfo)) await expect(card).not.toContainText("tokens");
   });
 });

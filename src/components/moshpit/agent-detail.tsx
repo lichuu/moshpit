@@ -17,7 +17,7 @@ import { Steer } from "@/components/moshpit/steer";
 import { Terminal, TerminalLinks } from "@/components/moshpit/terminal";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
-import { useAgentContext } from "@/lib/moshpit/context-meter";
+import { contextLevel, useAgentContext } from "@/lib/moshpit/context-meter";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import {
   targetIsCurrent,
@@ -230,7 +230,10 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
 
   const agent =
     agents.find((candidate) => candidate.id === selectedId) ?? agents[0];
-  const context = useAgentContext(agent?.id ?? "");
+  // A triage signal here, as on the card: the composer already shows the
+  // everyday figure, and this line has no room to spare on a phone.
+  const loaded = useAgentContext(agent?.id ?? "");
+  const context = loaded && ["warn", "high"].includes(contextLevel(loaded)) ? loaded : undefined;
 
   // Each pending action carries the host and pane it was started for, and
   // reads as nothing once the detail view shows any other pane or host. That
