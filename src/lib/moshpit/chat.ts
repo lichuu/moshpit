@@ -91,3 +91,10 @@ export function linesToConversation(
   }
   return out;
 }
+
+/**
+ * A user message is long past 400 characters or five lines. The rule reads the
+ * source text, not the rendered height, so a message never flips with the
+ * width of the screen.
+ */
+export const isLongMessage = (text: string) => text.length > 400 || text.trimEnd().split(/\r?\n/).length > 5;

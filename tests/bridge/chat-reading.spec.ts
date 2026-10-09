@@ -314,4 +314,193 @@ test.describe("stable chat reading", () => {
     await expect.poll(async () => Math.abs(((await offsetOf(page, "m4")) ?? Infinity) - start)).toBeLessThanOrEqual(2);
     await expect(page.getByRole("button", { name: "New activity" })).toHaveCount(0);
   });
+
+  // C2: long user messages sit behind Show more. The choice is a reading, so it
+  // survives leaving the agent, holds the reader's place and yields to search.
+  test.describe("long user messages", () => {
+    const user = (id: string, text: string): Entry => ({ id, turnId: `t-${id}`, kind: "message", role: "user", text });
+    /** Exactly `n` characters of prose that wraps like a real message. */
+    const prose = (n: number) => {
+      let text = "";
+      while (text.length < n) text += "lorem ";
+      return `${text.slice(0, n - 1)}.`;
+    };
+    const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+    const toggle = (page: Page, id: string) => page.locator(`[data-entry-id="${id}"]`).getByRole("button", { name: /^Show (more|less)$/ });
+    const clamp = (page: Page, id: string) => page.locator(`[data-entry-id="${id}"] .message-clamp`);
+
+    test("only user messages past 400 characters or five lines collapse", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      await serveSessions(page, host.url, {
+        "w1:p1": [
+          user("short", "Please fix the build."),
+          user("chars-400", prose(400)), user("chars-401", prose(401)),
+          user("lines-5", lines(5)), user("lines-6", lines(6)),
+          message("long-agent", "t9", 12),
+        ],
+      });
+      await openReader(page, host.url, host.port);
+
+      for (const id of ["short", "chars-400", "lines-5", "long-agent"]) await expect(toggle(page, id), `${id} is not collapsed`).toHaveCount(0);
+      for (const id of ["chars-401", "lines-6"]) {
+        await expect(toggle(page, id), `${id} is collapsed`).toHaveText("Show more");
+        await expect(toggle(page, id)).toHaveAttribute("aria-expanded", "false");
+      }
+      // The clamp really hides text and says so with a fade; the agent's long
+      // reply and a short user message have neither.
+      await expect(clamp(page, "lines-6")).toHaveAttribute("data-clipped", "true");
+      await expect(clamp(page, "short")).toHaveCount(0);
+      await expect(clamp(page, "long-agent")).toHaveCount(0);
+    });
+
+    test("Show more and Show less toggle with a 44px target, by pointer and keyboard", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      await serveSessions(page, host.url, { "w1:p1": [user("long", lines(12)), message("m1", "t2", 1)] });
+      await openReader(page, host.url, host.port);
+
+      const button = toggle(page, "long");
+      const height = () => clamp(page, "long").evaluate((el) => el.getBoundingClientRect().height);
+      const collapsedHeight = await height();
+      expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect((await button.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+
+      await button.click();
+      await expect(button).toHaveText("Show less");
+      await expect(button).toHaveAttribute("aria-expanded", "true");
+      await expect(clamp(page, "long")).toHaveAttribute("data-collapsed", "false");
+      await expect(clamp(page, "long")).not.toHaveAttribute("data-clipped", "true");
+      expect(await height()).toBeGreaterThan(collapsedHeight + 40);
+
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await expect(button).toHaveAttribute("aria-expanded", "false");
+      await page.keyboard.press("Space");
+      await expect(button).toHaveAttribute("aria-expanded", "true");
+      await page.keyboard.press("Space");
+      await expect(button).toHaveText("Show more");
+      expect(await height()).toBeCloseTo(collapsedHeight, 0);
+    });
+
+    test("Copy returns the whole message while it is collapsed", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      // A fence that would be left open if the Markdown source were cut short.
+      const text = `Run this:\n\n\`\`\`sh\n${lines(9)}\n\`\`\`\n\nand then read [the docs](https://example.com/docs) before you reply.`;
+      await serveSessions(page, host.url, { "w1:p1": [user("long", text)] });
+      await openReader(page, host.url, host.port);
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => { (window as unknown as { __copied: string }).__copied = t; } } });
+      });
+
+      await expect(toggle(page, "long")).toHaveText("Show more");
+      await page.locator('[data-entry-id="long"]').getByRole("button", { name: "Copy message" }).click();
+      expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe(text);
+      // The text is only clipped, not cut: the link is still in the document.
+      await expect(page.locator('[data-entry-id="long"] a[href="https://example.com/docs"]')).toBeAttached();
+    });
+
+    test("the choice survives leaving the agent and coming back", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      await serveSessions(page, host.url, {
+        "w1:p1": [user("opened", lines(8)), user("closed", lines(8)), message("m1", "t2", 1)],
+        "w1:p2": [message("x1", "t1", 1)],
+      });
+      await openReader(page, host.url, host.port);
+
+      await toggle(page, "opened").click();
+      await expect(toggle(page, "opened")).toHaveAttribute("aria-expanded", "true");
+      // A poll that re-sends the same entries changes nothing.
+      await page.waitForTimeout(1200);
+      await expect(toggle(page, "opened")).toHaveAttribute("aria-expanded", "true");
+
+      await back(page);
+      await openAgent(page, "elsewhere");
+      await back(page);
+      await openAgent(page, "reader");
+      await expect(toggle(page, "opened")).toHaveAttribute("aria-expanded", "true");
+      await expect(toggle(page, "closed")).toHaveAttribute("aria-expanded", "false");
+
+      // Closing it again is a return to the default, and that is remembered too.
+      await toggle(page, "opened").click();
+      await back(page);
+      await openAgent(page, "elsewhere");
+      await back(page);
+      await openAgent(page, "reader");
+      await expect(toggle(page, "opened")).toHaveAttribute("aria-expanded", "false");
+    });
+
+    test("a paused reader keeps their place when a long message above or at it is toggled", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      await serveSessions(page, host.url, {
+        "w1:p1": [
+          message("m1", "t1", 1), user("above", lines(14)), message("m2", "t2", 1), message("m3", "t2", 1),
+          user("at", lines(14)), message("m4", "t3", 1), message("m5", "t3", 1), message("m6", "t3", 1), message("m7", "t3", 1), message("m8", "t3", 1), message("m9", "t3", 1), message("m10", "t3", 1),
+        ],
+      });
+      await openReader(page, host.url, host.port);
+
+      const frames = async (entryId: string, act: () => Promise<void>) => {
+        const start = await offsetOf(page, entryId);
+        if (start === null) throw new Error("anchor missing");
+        await page.evaluate(() => { (window as unknown as { __sampling: boolean }).__sampling = true; });
+        await startSampling(page, entryId);
+        await act();
+        await page.waitForTimeout(300);
+        const samples = await stopSampling(page);
+        const usable = samples.filter((s) => s.offset !== null && !s.clamped);
+        expect(usable.length, "frames were sampled").toBeGreaterThan(10);
+        return Math.max(...usable.map((s) => Math.abs((s.offset as number) - start)));
+      };
+      const pane = page.locator(".conversation");
+      const height = () => pane.evaluate((el) => el.scrollHeight);
+
+      // Above: the reader is on m3, the tall message sits over it.
+      await readAt(page, "m3");
+      const before = await height();
+      let grown = before;
+      const worstAbove = await frames("m3", async () => {
+        await toggle(page, "above").evaluate((el) => (el as HTMLButtonElement).click());
+        await expect(toggle(page, "above")).toHaveAttribute("aria-expanded", "true");
+        grown = await height();
+        await toggle(page, "above").evaluate((el) => (el as HTMLButtonElement).click());
+        await expect(toggle(page, "above")).toHaveAttribute("aria-expanded", "false");
+      });
+      expect(worstAbove, "the anchor moved by at most 2px while a message above was toggled").toBeLessThanOrEqual(2);
+      expect(grown, "the toggle changed the content height").toBeGreaterThan(before + 40);
+
+      // At: the reader is on the tall message itself and taps its own button.
+      await readAt(page, "at");
+      const worstAt = await frames("at", async () => {
+        await toggle(page, "at").click();
+        await expect(toggle(page, "at")).toHaveAttribute("aria-expanded", "true");
+        // Expanded, its button is below the fold; a real click would scroll to it, which is the test moving the reader.
+        await toggle(page, "at").evaluate((el) => (el as HTMLButtonElement).click());
+        await expect(toggle(page, "at")).toHaveAttribute("aria-expanded", "false");
+      });
+      expect(worstAt, "the message under the reader's thumb stayed put").toBeLessThanOrEqual(2);
+    });
+
+    test("search opens a collapsed match, and clearing it returns the saved choice", async ({ page, bridge }) => {
+      const host = await bridge({ herdr });
+      await serveSessions(page, host.url, {
+        "w1:p1": [user("hit", `${lines(9)}\nneedle in the tail`), user("kept-open", `${lines(9)}\nneedle again`), message("m1", "t1", 1)],
+      });
+      await openReader(page, host.url, host.port);
+
+      await toggle(page, "kept-open").click();
+      await expect(toggle(page, "hit")).toHaveAttribute("aria-expanded", "false");
+
+      // The match sits below the clamp; search opens the message, with nothing to toggle.
+      const search = page.getByRole("textbox", { name: "Search conversation" });
+      await search.fill("needle");
+      await expect(toggle(page, "hit")).toHaveCount(0);
+      await expect(clamp(page, "hit")).toHaveAttribute("data-collapsed", "false");
+      await expect(clamp(page, "hit")).not.toHaveAttribute("data-clipped", "true");
+      expect(await clamp(page, "hit").evaluate((el) => el.scrollHeight - el.clientHeight), "nothing is hidden").toBeLessThanOrEqual(1);
+
+      await search.fill("");
+      await expect(toggle(page, "hit")).toHaveAttribute("aria-expanded", "false");
+      await expect(toggle(page, "kept-open")).toHaveAttribute("aria-expanded", "true");
+    });
+
+  });
 });
