@@ -241,6 +241,7 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
           sessionId={sessionId}
           nativePane={nativePane}
           onDelivered={delivered}
+          context={available?.context}
           liveQuestion={agent.blockedDialog?.kind === "choose" && agent.blockedDialog.family === "claude-ask-user-review-v1"
             ? false
             : available?.entries.some((entry) => entry.kind === "question" && !entry.resolved)}

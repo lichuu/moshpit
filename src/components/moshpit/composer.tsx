@@ -10,7 +10,9 @@ import { bridgeUrl, encodeImage, fetchCommands } from "@/lib/moshpit/bridge";
 import { commandScope, detectCommandToken, insertPrefix, insertSuggestion, matchCommands, mergeCatalog, type CommandSuggestion, type DisplayCatalog, type RemoteCatalog, type TokenRange } from "@/lib/moshpit/commands";
 import { builtinCommands, collisionPolicy } from "@/lib/moshpit/builtin-commands";
 import { submitSession } from "@/lib/moshpit/session";
-import type { InputMode, Receipt, SessionCapabilities } from "@/lib/moshpit/session-protocol";
+import { ContextMeter } from "@/components/moshpit/context-meter";
+import { hasContextMeter } from "@/lib/moshpit/context-meter";
+import type { ContextUsage, InputMode, Receipt, SessionCapabilities } from "@/lib/moshpit/session-protocol";
 import type { Agent, Snippet } from "@/lib/moshpit/types";
 import { SNIPPET_LIMITS, validateSnippet } from "@/lib/moshpit/snippets";
 import { quickRepliesFor, type QuickReply } from "@/lib/moshpit/quick-replies";
@@ -39,6 +41,8 @@ type Props = {
   nativePane?: { open: boolean; onToggle: () => void };
   /** Called once a submission is delivered, with its request ID. */
   onDelivered?: (requestId: string) => void;
+  /** Chat only: context use of the session's latest model call, when the bridge reports it. */
+  context?: ContextUsage;
 };
 
 /**
@@ -87,7 +91,7 @@ export const Composer = memo(function Composer(props: Props) {
   return <SessionComposer key={JSON.stringify(key)} {...props} draftKey={key} />;
 });
 
-function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot, nativePane, onDelivered }: Props & { draftKey: DraftKey }) {
+function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot, nativePane, onDelivered, context }: Props & { draftKey: DraftKey }) {
   const saved = useDraft(draftKey);
   const { draft } = saved;
   const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
@@ -651,6 +655,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </div>
       </div>
     </div>
+    <ContextMeter context={context} reserve={!terminal && hasContextMeter(agent.kind)} />
     {(draft.submission || unavailable) && <div className="mt-1 flex shrink-0 items-center gap-2 px-2 text-xs text-muted">
       <p role="status" className="min-w-0 flex-1">{(busy ? "Sending…" : draft.submission?.message) || (unavailable ? "Reconnect to send. Your draft stays on this device." : "")}</p>
       {/* Delivered is not done: a command may have opened a menu in the pane,

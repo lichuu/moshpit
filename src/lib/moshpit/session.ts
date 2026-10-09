@@ -1,8 +1,9 @@
 import { accessError } from "./access";
 import { useEffect, useRef, useState } from "react";
 import { headers } from "./bridge";
+import { publishContext, setContextLive } from "./context-meter";
 import { ReceiptSchema, SessionResponseSchema } from "./session-protocol";
-import type { Question, Receipt, SessionCapabilities, SessionEntry, SessionResponse, Submission } from "./session-protocol";
+import type { ContextUsage, Question, Receipt, SessionCapabilities, SessionEntry, SessionResponse, Submission } from "./session-protocol";
 
 type AvailableSession = Extract<SessionResponse, { kind: "available" }>;
 type CachedSession = { value: SessionResponse; error: string | null; epoch: number };
@@ -13,6 +14,7 @@ function commit(key: string, value: SessionResponse, older: boolean): CachedSess
   const reset = value.kind !== "available" || previous?.value.kind !== "available" || value.reset || value.sessionId !== previous.value.sessionId;
   const next = { value: mergeSession(previous?.value, value, older), error: null, epoch: (previous?.epoch ?? 0) + Number(reset) };
   cache.set(key, next);
+  publishContext(key, value.kind === "available" ? value.context : undefined);
   return next;
 }
 
@@ -38,6 +40,9 @@ export function sameEntry(a: SessionEntry, b: SessionEntry): boolean {
   }
 }
 
+const sameContext = (a: ContextUsage | undefined, b: ContextUsage | undefined) =>
+  a === b || (a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b));
+
 const sameCapabilities = (a: SessionCapabilities, b: SessionCapabilities) =>
   a.stop === b.stop && a.fit === b.fit && sameList(a.inputModes, b.inputModes, (x, y) => x === y);
 
@@ -60,8 +65,11 @@ export function mergeSession(previous: SessionResponse | undefined, next: Sessio
   // Cursor, history bound or capabilities can move without any entry changing,
   // and the next poll must see them, so only a response equal in all of them
   // keeps the previous object.
-  if (entries === previous.entries && cursor === previous.cursor && before === previous.before && sameCapabilities(previous.capabilities, next.capabilities)) return previous;
-  return { ...next, entries, cursor, before, capabilities: sameCapabilities(previous.capabilities, next.capabilities) ? previous.capabilities : next.capabilities };
+  // The bridge reports the newest usage on every response, whichever page it
+  // answers, so the latest one is always the one to keep.
+  const context = sameContext(previous.context, next.context) ? previous.context : next.context;
+  if (entries === previous.entries && cursor === previous.cursor && before === previous.before && context === previous.context && sameCapabilities(previous.capabilities, next.capabilities)) return previous;
+  return { ...next, entries, cursor, before, context, capabilities: sameCapabilities(previous.capabilities, next.capabilities) ? previous.capabilities : next.capabilities };
 }
 
 export function useSession(url: string, agentId: string, demo?: AvailableSession) {
@@ -76,6 +84,7 @@ export function useSession(url: string, agentId: string, demo?: AvailableSession
     const controller = new AbortController();
     lifecycle.current = controller;
     setLoadingOlder(false);
+    setContextLive(key, true);
     let timer: ReturnType<typeof setTimeout>;
     let busy = false;
     async function refresh() {
@@ -103,7 +112,7 @@ export function useSession(url: string, agentId: string, demo?: AvailableSession
     function visible() { clearTimeout(timer); void refresh(); }
     document.addEventListener("visibilitychange", visible);
     void refresh();
-    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener("visibilitychange", visible); };
+    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener("visibilitychange", visible); setContextLive(key, false); };
   }, [url, agentId, key]);
 
   async function loadOlder() {

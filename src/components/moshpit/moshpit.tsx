@@ -12,6 +12,8 @@ import {
 import type { Agent, FilterId } from "@/lib/moshpit/types";
 import { cn, formatAgo } from "@/lib/utils";
 import { StatusPill } from "@/components/moshpit/status-pill";
+import { ContextBadge } from "@/components/moshpit/context-meter";
+import { contextLevel, useAgentContext } from "@/lib/moshpit/context-meter";
 import { Button } from "@/components/ui/button";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { fetchRepoRoot } from "@/lib/moshpit/bridge";
@@ -29,6 +31,10 @@ function AgentCard({ agent, all }: { agent: Agent; all: Agent[] }) {
   const blocked = agent.status === "blocked";
   const selected = useMoshpitStore((s) => s.selectedAgentId === agent.id);
   const layout = useLayout();
+  // Only an agent whose conversation is open is being read, so only it has a
+  // figure; and only past the amber line, since this is a triage signal.
+  const context = useAgentContext(agent.id);
+  const pressing = context && ["warn", "high"].includes(contextLevel(context)) ? context : undefined;
   return (
     <button
       type="button"
@@ -84,6 +90,7 @@ function AgentCard({ agent, all }: { agent: Agent; all: Agent[] }) {
             <span className="truncate">{agent.branch}</span>
           </>
         ) : null}
+        {pressing ? <ContextBadge context={pressing} className="ml-auto" /> : null}
       </div>
     </button>
   );

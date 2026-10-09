@@ -739,3 +739,83 @@ test.describe("terminal key queue", () => {
     expect(batch).toEqual([{ text: "ab" }, "home", { text: "c" }, "ctrl+left", "f5", "delete", { text: "d" }]);
   });
 });
+
+// C1: the context field is optional on the wire. An older bridge omits it, and
+// a value this client cannot read must cost the meter, never the conversation.
+test.describe("session context field", () => {
+  const PROTOCOL = "/src/lib/moshpit/session-protocol.ts";
+  const METER = "/src/lib/moshpit/context-meter.ts";
+
+  test("a response without the field still parses; a bad one is dropped, not fatal", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const result = await page.evaluate(async (mod) => {
+      const { SessionResponseSchema } = await import(mod);
+      const base = {
+        kind: "available", agentId: "pane", sessionId: "s", entries: [], cursor: "c", before: null, reset: false,
+        capabilities: { inputModes: ["send"], stop: false, fit: false },
+      };
+      const parse = (extra: object) => {
+        const parsed = SessionResponseSchema.safeParse({ ...base, ...extra });
+        return parsed.success ? { ok: true, context: parsed.data.context } : { ok: false, context: undefined };
+      };
+      return {
+        absent: parse({}),
+        tokens: parse({ context: { used: 84000 } }),
+        full: parse({ context: { used: 1, capacity: 10, limits: { primary: { usedPercent: 62, windowMinutes: 300, resetsAt: 1900000000 } } } }),
+        negative: parse({ context: { used: -3 } }),
+        wrongType: parse({ context: "lots" }),
+        badLimit: parse({ context: { used: 1, limits: { primary: { usedPercent: 400 } } } }),
+      };
+    }, PROTOCOL);
+    expect(result.absent).toEqual({ ok: true });
+    expect(result.tokens).toEqual({ ok: true, context: { used: 84000 } });
+    expect(result.full.context.limits.primary.usedPercent).toBe(62);
+    for (const dropped of [result.negative, result.wrongType, result.badLimit]) expect(dropped).toEqual({ ok: true });
+  });
+
+  test("a changed or cleared measurement lands even when no entry changed", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const result = await page.evaluate(async (mod) => {
+      const { mergeSession } = await import(mod);
+      const previous = {
+        kind: "available", agentId: "pane", sessionId: "s", entries: [], cursor: "c", before: null, reset: false,
+        capabilities: { inputModes: ["send"], stop: false, fit: false }, context: { used: 100, capacity: 1000 },
+      };
+      const same = mergeSession(previous, { ...previous, context: { used: 100, capacity: 1000 } });
+      const moved = mergeSession(previous, { ...previous, context: { used: 200, capacity: 1000 } });
+      const { context: _gone, ...compacted } = previous;
+      const cleared = mergeSession(previous, compacted);
+      const older = mergeSession(previous, { ...previous, context: { used: 100, capacity: 1000 } }, true);
+      return { same: same === previous, moved: moved.context, cleared: cleared.context, older: older === previous };
+    }, SESSION);
+    expect(result.same).toBe(true);
+    expect(result.moved).toEqual({ used: 200, capacity: 1000 });
+    expect(result.cleared).toBeUndefined();
+    expect(result.older).toBe(true);
+  });
+
+  test("levels switch at 75% and 90%, and unknown capacity has no level or percentage", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const result = await page.evaluate(async (mod) => {
+      const { contextLevel, contextLabel, contextPercent, limitLine } = await import(mod);
+      const at = (used: number) => ({ used, capacity: 1000 });
+      const soon = Math.floor(Date.now() / 1000) + 3600;
+      return {
+        levels: [0, 749, 750, 899, 900, 1000].map((used) => contextLevel(at(used))),
+        unknown: [contextLevel({ used: 84000 }), contextPercent({ used: 84000 }), contextLabel({ used: 84000 })],
+        known: contextLabel(at(620)),
+        small: contextLabel({ used: 900 }),
+        stale: limitLine({ primary: { usedPercent: 90, windowMinutes: 300, resetsAt: 1 } }),
+        worst: limitLine({ primary: { usedPercent: 10, windowMinutes: 300, resetsAt: soon }, secondary: { usedPercent: 80, windowMinutes: 10080, resetsAt: soon } })?.replace(/resets .*/, "resets T"),
+        noReset: limitLine({ primary: { usedPercent: 62.4, windowMinutes: 300 } }),
+      };
+    }, METER);
+    expect(result.levels).toEqual(["ok", "ok", "warn", "warn", "high", "high"]);
+    expect(result.unknown).toEqual(["unknown", undefined, "84k tokens in context"]);
+    expect(result.known).toBe("62% of context");
+    expect(result.small).toBe("900 tokens in context");
+    expect(result.stale).toBeUndefined();
+    expect(result.worst).toBe("7d window 80% · resets T");
+    expect(result.noReset).toBe("5h window 62%");
+  });
+});

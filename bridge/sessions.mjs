@@ -97,6 +97,97 @@ function piSkillCommand(text) {
   return match ? `/skill:${match[1]}${match[2] ? ` ${match[2]}` : ""}` : text;
 }
 
+// Pi's last entry is the active leaf; parent links select the visible branch.
+function piBranch(records) {
+  const byId = new Map(records.filter((r) => r.id).map((r) => [r.id, r]));
+  let leaf = records.findLast((r) => r.id && r.type !== "session");
+  const branch = [];
+  const visited = new Set();
+  while (leaf && !visited.has(leaf.id)) {
+    visited.add(leaf.id); branch.push(leaf); leaf = byId.get(leaf.parentId);
+  }
+  return branch.reverse();
+}
+
+// Context use is read from the latest PARENT model call, never from running
+// totals, so subagent traffic and billing counters cannot move it. Every number
+// is checked here and a bad one drops the whole field: a meter that is wrong is
+// worse than none. 1e8 is far above any real window and below anything that
+// would overflow a display.
+const TOKEN_LIMIT = 1e8;
+const tokens = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= TOKEN_LIMIT ? Math.round(value) : undefined;
+// Missing counters are zero (a call with no cache fields); present ones must be sound.
+function tokenSum(usage, keys) {
+  if (!usage || typeof usage !== "object") return undefined;
+  let total = 0;
+  for (const key of keys) {
+    if (usage[key] === undefined || usage[key] === null) continue;
+    const value = tokens(usage[key]);
+    if (value === undefined) return null;
+    total += value;
+  }
+  return total <= TOKEN_LIMIT ? total : null;
+}
+const usageContext = (used, capacity) => {
+  if (used === null || used === undefined) return undefined;
+  const size = tokens(capacity);
+  // A window smaller than what is in it cannot be right; keep the tokens only.
+  return { used, ...(size && size >= used ? { capacity: size } : {}) };
+};
+const bounded = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? value : undefined;
+function rateWindow(raw) {
+  const usedPercent = bounded(raw?.used_percent, 0, 100);
+  if (usedPercent === undefined) return undefined;
+  const windowMinutes = bounded(raw.window_minutes, 1, 525600);
+  const resetsAt = bounded(raw.resets_at, 1, 4e9);
+  return { usedPercent: Math.round(usedPercent * 10) / 10, ...(windowMinutes ? { windowMinutes: Math.round(windowMinutes) } : {}), ...(resetsAt ? { resetsAt: Math.round(resetsAt) } : {}) };
+}
+function codexLimits(records) {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const row = records[i];
+    const limits = row.type === "event_msg" && row.payload?.type === "token_count" ? row.payload.rate_limits : undefined;
+    if (!limits) continue;
+    const primary = rateWindow(limits.primary);
+    const secondary = rateWindow(limits.secondary);
+    if (primary || secondary) return { ...(primary ? { primary } : {}), ...(secondary ? { secondary } : {}) };
+    return undefined;
+  }
+}
+// Walks back to the newest usage row, or to a compaction marker first, which
+// means the old measurement no longer describes the conversation.
+function measureContext(kind, records) {
+  if (kind === "pi") records = piBranch(records);
+  for (let i = records.length - 1; i >= 0; i--) {
+    const row = records[i];
+    if (kind === "codex") {
+      if (row.type === "compacted") return undefined;
+      const p = row.payload;
+      if (row.type !== "event_msg" || p?.type !== "token_count" || !p.info) continue;
+      const last = p.info.last_token_usage;
+      const used = last && typeof last === "object" && last.total_tokens !== undefined ? tokenSum(last, ["total_tokens"]) : tokenSum(last, ["input_tokens", "output_tokens"]);
+      if (used === undefined || used === 0) continue;
+      const context = usageContext(used, p.info.model_context_window);
+      const limits = context && codexLimits(records);
+      return context && { ...context, ...(limits ? { limits } : {}) };
+    }
+    if (kind === "claude") {
+      if (row.type === "system" && row.subtype === "compact_boundary") return undefined;
+      if (row.type !== "assistant" || row.isSidechain || row.message?.model === "<synthetic>") continue;
+      const used = tokenSum(row.message?.usage, ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]);
+      if (used === 0 || used === undefined) continue;
+      return usageContext(used);
+    }
+    if (kind === "pi") {
+      if (["compaction", "branch_summary"].includes(row.type)) return undefined;
+      if (row.type !== "message" || row.message?.role !== "assistant") continue;
+      const used = tokenSum(row.message.usage, ["input", "cacheRead", "cacheWrite"]);
+      if (used === 0 || used === undefined) continue;
+      return usageContext(used);
+    }
+    return undefined;
+  }
+}
+
 function normalize(kind, records) {
   let entries = [];
   let turnId = "initial";
@@ -155,17 +246,7 @@ function normalize(kind, records) {
       else if (["image", "input_image"].includes(part.type)) message(role, "[Image]", row, suffix);
     });
   };
-  if (kind === "pi") {
-    // Pi's last entry is the active leaf; parent links select the visible branch.
-    const byId = new Map(records.filter((r) => r.id).map((r) => [r.id, r]));
-    let leaf = records.findLast((r) => r.id && r.type !== "session");
-    const branch = [];
-    const visited = new Set();
-    while (leaf && !visited.has(leaf.id)) {
-      visited.add(leaf.id); branch.push(leaf); leaf = byId.get(leaf.parentId);
-    }
-    records = branch.reverse();
-  }
+  if (kind === "pi") records = piBranch(records);
   for (const row of records) {
     if (kind === "codex") {
       const p = row.payload ?? {};
@@ -327,6 +408,9 @@ export function createSessionReader(options = {}) {
     const previous = new Map(state.entries.map((entry) => [entry.id, JSON.stringify(entry)]));
     for (const entry of next) if (JSON.stringify(entry) !== previous.get(entry.id) || !state.versions.has(entry.id)) state.versions.set(entry.id, state.revision);
     state.entries = next;
+    // Read from the cached records, so it is the newest usage in the file
+    // whichever page a client asks for.
+    state.context = kind === "opencode" ? undefined : measureContext(kind, records);
     return state;
   }
   // When the newest message in a session was sent or received, for ordering
@@ -388,7 +472,7 @@ export function createSessionReader(options = {}) {
         entries = state.entries.slice(start, end);
       }
       const before = start > 0 ? encode({ s: sessionId, g: state.generation, r: state.revision, b: state.entries[start].id }) : null;
-      return { kind: "available", agentId: agent.id, sessionId, entries, cursor, before, reset, capabilities };
+      return { kind: "available", agentId: agent.id, sessionId, entries, cursor, before, reset, capabilities, ...(state.context ? { context: state.context } : {}) };
     } catch (error) {
       return { kind: "unavailable", agentId: agent.id, reason: error.code === "ENOENT" ? "The native session file is not available yet." : error.message };
     }
