@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, Check, ChevronRight, Copy, Search, SquareTerminal } from "lucide-react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, Check, ChevronDown, ChevronRight, Copy, Search, SquareTerminal } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import ChatMarkdown from "./chat-markdown";
+import { isLongMessage } from "@/lib/moshpit/chat";
 import type { Question, SessionEntry } from "@/lib/moshpit/session-protocol";
 import type { AnswerCallback, BlockedDialog } from "@/lib/moshpit/types";
 
@@ -17,6 +18,7 @@ type Anchor = { entryId: string; offset: number };
 //
 // `open` and `nested` hold only the choices a reader made, for activity groups
 // and single activities, that differ from the default: closed unless failed.
+// `open` also holds long user messages by entry ID, closed by default.
 type Reading = { top: number; following: boolean; applying: boolean; intent: boolean; anchor: Anchor | null; open: Map<string, boolean>; nested: Map<string, boolean> };
 const readings = new Map<string, Reading>();
 const freshReading = (): Reading => ({ top: 0, following: true, applying: false, intent: false, anchor: null, open: new Map(), nested: new Map() });
@@ -332,6 +334,42 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
   );
 }
 
+// The collapse is a clamp on the rendered block, never a cut in the Markdown
+// source, so a fence or a link can't be broken. `clipped` marks that the clamp
+// really hides something, so a message that fits gets no fade. There is no
+// height animation: the reader's anchor must hold on the frame of the tap.
+function ClampedText({ text, collapsed, id }: { text: string; collapsed: boolean; id: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const mark = () => { el.dataset.clipped = String(collapsed && el.scrollHeight > el.clientHeight + 1); };
+    mark();
+    const observer = new ResizeObserver(mark);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [collapsed, text]);
+  return <div ref={box} id={id} data-collapsed={collapsed} className="message-clamp"><ChatMarkdown text={text} /></div>;
+}
+
+function UserMessage({ text, expanded, forced, onToggle, onCopy }: {
+  text: string; expanded: boolean; forced: boolean; onToggle: (open: boolean) => void; onCopy: () => void;
+}) {
+  const textId = useId();
+  const copy = <button type="button" aria-label="Copy message" onClick={onCopy} className="flex h-8 items-center gap-1 text-xs text-subtle"><Copy className="size-3" /> Copy</button>;
+  return <>
+    <ClampedText id={textId} text={text} collapsed={!expanded} />
+    <div className="mt-1 flex items-center gap-4">
+      {/* Search forces the message open, so it has nothing to toggle there. */}
+      {!forced && <button type="button" aria-expanded={expanded} aria-controls={textId} onClick={() => onToggle(!expanded)} className="message-toggle -ml-1 flex h-11 min-w-11 items-center gap-1 rounded-lg px-1 text-xs font-medium text-muted">
+        <ChevronDown className={cn("size-3.5", expanded && "rotate-180")} />
+        {expanded ? "Show less" : "Show more"}
+      </button>}
+      {copy}
+    </div>
+  </>;
+}
+
 const marker = "list-none [&::-webkit-details-marker]:hidden";
 
 function ActivityGroup({ id, activities, search, reading, onCopy }: {
@@ -397,6 +435,9 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
   const mounted = useRef(false);
   const [search, setSearch] = useState("");
   const [unseen, setUnseen] = useState(false);
+  // Counts message expansion toggles: the choice lives in `Reading.open`, which
+  // renders nothing by itself, and the layout effect re-enters applyReading.
+  const [toggles, setToggles] = useState(0);
   if (search) searching.current ??= { ...freshReading(), following: false, top: normal.current.top, anchor: normal.current.anchor };
   else searching.current = null;
   // The reading every scroll path reads and writes: the search one while a
@@ -429,7 +470,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
     }
     previousEntries.current = entries;
     readings.set(sessionId, normal.current);
-  }, [entries, loadingOlder, search, sessionId]);
+  }, [entries, loadingOlder, search, sessionId, toggles]);
 
   useEffect(() => {
     const element = scroll.current;
@@ -456,6 +497,12 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
   }
   function userScroll() {
     reading.current.intent = true;
+  }
+  // Only a state that differs from the default (collapsed) is a choice.
+  function toggleMessage(id: string, open: boolean) {
+    if (open) normal.current.open.set(id, true);
+    else normal.current.open.delete(id);
+    setToggles((n) => n + 1);
   }
   async function copy(text: string) {
     try { await navigator.clipboard.writeText(text); toast("Copied"); }
@@ -505,8 +552,12 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
             <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onUseTerminal={onUseTerminal} />
           ) : entry && "text" in entry ? (
             <article key={group.id} data-entry-id={group.id} data-role={entry.kind === "message" ? entry.role === "assistant" ? "agent" : "user" : "system"} className={entry.kind === "status" ? "text-xs text-muted" : entry.role === "user" ? "ml-auto max-w-[92%] rounded-xl bg-surface px-3 py-2" : "min-w-0 rounded-xl border border-border p-3 text-base leading-relaxed"}>
-              <ChatMarkdown text={entry.text} />
-              {entry.kind === "message" && <button type="button" aria-label="Copy message" onClick={() => void copy(entry?.text ?? "")} className="mt-1 flex h-8 items-center gap-1 text-xs text-subtle"><Copy className="size-3" /> Copy</button>}
+              {entry.kind === "message" && entry.role === "user" && isLongMessage(entry.text)
+                ? <UserMessage text={entry.text} expanded={Boolean(search) || (normal.current.open.get(group.id) ?? false)} forced={Boolean(search)} onToggle={(open) => toggleMessage(group.id, open)} onCopy={() => void copy(entry.text)} />
+                : <>
+                  <ChatMarkdown text={entry.text} />
+                  {entry.kind === "message" && <button type="button" aria-label="Copy message" onClick={() => void copy(entry?.text ?? "")} className="mt-1 flex h-8 items-center gap-1 text-xs text-subtle"><Copy className="size-3" /> Copy</button>}
+                </>}
             </article>
           ) : (
             <ActivityGroup key={group.id} id={group.id} activities={group.activities} search={Boolean(search)} reading={normal.current} onCopy={(a) => void copy(entryText(a))} />
