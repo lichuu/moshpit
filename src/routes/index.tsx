@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { toast, Toaster } from "sonner";
 import { AppShell } from "@/components/moshpit/app-shell";
 import { Onboarding } from "@/components/moshpit/onboarding";
@@ -13,6 +13,20 @@ import { useMoshpitStore } from "@/lib/moshpit/store";
 import { DEFAULT_THEME, THEMES, isThemeId } from "@/lib/moshpit/themes";
 
 export const Route = createFileRoute("/")({ component: Home });
+
+// Toasts overlay the app (fixed, no layout space) and take the theme's tokens.
+// The top offset clears the notch/status bar; the 16 px side margins are the
+// mobile offset, and styles.css caps the width at 360 px.
+const TOAST_TOP = "calc(env(safe-area-inset-top, 0px) + 12px)";
+const TOAST_OFFSET = { top: TOAST_TOP, left: 16, right: 16 };
+const TOAST_STYLE = {
+  fontFamily: "var(--font-sans)",
+  "--width": "360px",
+  "--border-radius": "12px",
+  "--normal-bg": "var(--color-surface)",
+  "--normal-text": "var(--color-fg)",
+  "--normal-border": "var(--color-border-strong)",
+} as CSSProperties;
 
 function Home() {
   const onboarded = useMoshpitStore((s) => s.onboarded);
@@ -38,7 +52,13 @@ function Home() {
   return (
     <PwaProvider>
       <MoshpitRuntime onReady={setReady} />
-      <Toaster theme={toastTheme} position="top-center" />
+      <Toaster
+        theme={toastTheme}
+        position="top-center"
+        style={TOAST_STYLE}
+        offset={TOAST_OFFSET}
+        mobileOffset={TOAST_OFFSET}
+      />
       {confirmingSetup ? (
         <SetupConfirm />
       ) : !ready && !onboarded && !connected ? (

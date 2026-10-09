@@ -327,6 +327,29 @@ html[data-layout="phone"][data-compact="true"] .detail-views > button {
   }
 }
 
+/* Toasts: wrap long hostnames inside a 360 px card, centred when the phone is
+   wider than that, and take the theme's muted text for the second line. The
+   check icon on a success carries the accent. */
+[data-sonner-toaster] [data-sonner-toast] {
+  max-width: 360px;
+}
+/* Sonner's phone layout (up to 600px) fills the width between the margins;
+   past 392px that is wider than the cap, so centre the capped card. */
+@media (min-width: 393px) and (max-width: 600px) {
+  [data-sonner-toaster] [data-sonner-toast] {
+    margin-left: calc((100vw - 32px - 360px) / 2);
+  }
+}
+[data-sonner-toast][data-styled="true"] [data-title] {
+  overflow-wrap: anywhere;
+}
+[data-sonner-toast][data-styled="true"] [data-description] {
+  color: var(--color-muted);
+}
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--color-accent);
+}
+
 @utility tap-scale {
   transform-origin: center;
   transition-property: transform;

@@ -294,8 +294,9 @@ test.describe("companion shell", () => {
     await expect(demo.getByText("demo shell ran it")).toBeVisible();
 
     await demo.getByRole("button", { name: "Close shell" }).click();
-    await expect(demo.getByRole("button", { name: "Really close?" })).toBeVisible();
-    await demo.getByRole("button", { name: "Really close?" }).click();
+    const confirm = demo.getByRole("alertdialog");
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "Close shell" }).click();
     await expect(demo.getByText("companion shell")).toHaveCount(0);
   });
 });

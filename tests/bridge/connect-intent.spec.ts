@@ -20,7 +20,9 @@ async function enroll(page: Page, url: string) {
   await pairBridge(page, url, token);
 }
 
-const attached = (page: Page, label?: string) => page.getByText(label ? `Attached to ${label}` : /^Attached to /);
+// The toast only: the Hosts screen has its own "Connected to {host}" line.
+const attached = (page: Page, label?: string) =>
+  page.locator("[data-sonner-toast]").filter({ hasText: label ? `Connected to ${label}` : /^Connected to / });
 
 test.describe("connection intent", () => {
   test("an explicit Connect announces once; a startup reconnect is silent", async ({ page, bridge }) => {
@@ -73,5 +75,57 @@ test.describe("connection intent", () => {
     await expect(attached(page, "Slow")).toHaveCount(0);
     const connected = await page.evaluate(() => JSON.parse(localStorage.getItem("moshpit-v1") ?? "{}").state?.connectedHostId);
     expect(connected).toBe("f");
+  });
+
+  test("a failed explicit Connect announces no success", async ({ page, bridge }) => {
+    const host = await bridge({ herdr });
+    await openApp(page, { demo: false });
+    await enroll(page, host.url);
+    await seedHosts(page, [profile("a", "Alpha", host)]);
+    await page.route(`${host.url}/api/snapshot`, (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "boom", message: "snapshot failed" } }) }),
+    );
+
+    await page.getByRole("button", { name: /hosts/i }).first().click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    await expect(page.getByText("Bridge unreachable").first()).toBeVisible({ timeout: 20_000 });
+    await expect(attached(page)).toHaveCount(0);
+  });
+
+  test("the success toast lasts 2.5 seconds, not the library default", async ({ page, bridge }) => {
+    const host = await bridge({ herdr });
+    await openApp(page, { demo: false });
+    await enroll(page, host.url);
+    await seedHosts(page, [profile("a", "Alpha", host)]);
+
+    await page.getByRole("button", { name: /hosts/i }).first().click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    const toast = attached(page, "Alpha");
+    await expect(toast).toBeVisible();
+    // 2.5 s plus the exit animation; the default 4 s would still be on screen.
+    await expect(toast).toBeHidden({ timeout: 3600 });
+  });
+
+  test("a long hostname wraps inside the toast and stays on screen at 320px", async ({ page, bridge }) => {
+    const host = await bridge({ herdr });
+    const long = "a-very-long-machine-name-with-no-spaces-in-it-at-all-".repeat(2) + "end";
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openApp(page, { demo: false });
+    await enroll(page, host.url);
+    await seedHosts(page, [profile("a", long, host)]);
+
+    await page.getByRole("button", { name: /hosts/i }).first().click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    const card = page.locator("[data-sonner-toast]").filter({ hasText: "Connected to" });
+    await expect(card).toBeVisible();
+    // Let the entrance transition finish before measuring.
+    await page.waitForTimeout(600);
+    const box = (await card.boundingBox())!;
+    expect(box.x, "16px margin on the left").toBeGreaterThanOrEqual(15);
+    expect(box.x + box.width, "16px margin on the right").toBeLessThanOrEqual(305);
+    expect(box.width).toBeLessThanOrEqual(360);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.height, "the name wrapped onto several lines").toBeGreaterThan(60);
+    expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   });
 });
