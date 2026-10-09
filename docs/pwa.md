@@ -1145,6 +1145,8 @@ The worker installs only after every required asset downloads. **Refresh to upda
 
 Chat reads the exact native session reported by the pane; it does not infer a conversation from terminal repaint text. Supported readers cover Claude, Codex, Pi, Grok, and registered OpenCode sessions. If the source is missing, ambiguous, or unsupported, use Terminal. Search covers loaded history; **Load older history** fetches earlier entries.
 
+Your own messages longer than 400 characters or five lines show their first lines with a fade and a **Show more** button; **Show less** folds them again. **Copy** always copies the whole message, and the choice is kept when you leave the agent and come back. Search opens every matching long message and puts your choices back when you clear it. Agent replies are never folded.
+
 Recognized live Codex choose cards can be answered in Chat. Only the current question's matching printed keys are enabled. The bridge rechecks the dialog and consumes a one-shot token before sending the key, without an extra Enter. Multi-select and unsupported dialog shapes fall back to **Answer in Terminal**. The demo includes a three-question wizard; that is not evidence of a successful real-device probe.
 
 While a recognized choose dialog owns the keyboard, ordinary composer sends and quick replies are refused. For an unread blocked dialog, sending text only types it into the pane. **Typed without submitting** exposes Enter and Esc for an explicit next action; inspect the pane before using either. Inbox's **Type y** and **Type n** controls follow the same insert-only rule, rather than claiming to approve or deny.
