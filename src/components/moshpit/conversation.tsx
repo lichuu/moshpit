@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, Check, ChevronRight, Copy, Search, SquareTerminal } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -350,7 +350,7 @@ function ActivityGroup({ id, activities, search, reading, onCopy }: {
   return <details data-entry-id={id} open={search || (reading.open.get(id) ?? failed)} onToggle={(e) => choose(reading.open, id, e.currentTarget.open, failed)} className="group/activity text-sm">
     <summary className={cn(marker, "flex min-h-8 cursor-pointer items-center gap-2 text-muted")}>
       {running
-        ? <span className="size-1.5 shrink-0 rounded-full bg-working motion-pulse" />
+        ? <span className="size-1.5 shrink-0 rounded-full bg-working motion-blink" />
         : <ChevronRight className="size-4 shrink-0 transition-transform group-open/activity:rotate-90" />}
       <span className={cn("min-w-0 truncate", failed && "text-blocked")}>{activitySummary(activities)}</span>
     </summary>
@@ -362,7 +362,7 @@ function ActivityGroup({ id, activities, search, reading, onCopy }: {
           <summary className={cn(marker, "flex min-h-8 cursor-pointer items-center gap-2", activity.status === "failed" ? "text-blocked" : "text-muted")}>
             <span className="shrink-0 text-fg">{phrases[kind].done}</span>
             <span className="min-w-0 truncate font-mono text-xs">{label}</span>
-            {activity.status === "running" && <span className="size-1.5 shrink-0 rounded-full bg-working motion-pulse" />}
+            {activity.status === "running" && <span className="size-1.5 shrink-0 rounded-full bg-working motion-blink" />}
             {activity.status === "failed" && <span className="shrink-0 text-xs">failed</span>}
           </summary>
           <div className="mb-2 rounded-lg bg-surface/40 px-3 py-1">
@@ -461,6 +461,11 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
     try { await navigator.clipboard.writeText(text); toast("Copied"); }
     catch { toast("Could not copy. Select the text to copy it."); }
   }
+  const showWorking = working && !search;
+  // While the agent works, Working sits above the turn's latest tool group
+  // and stays there, so the group does not shift as each tool starts and ends.
+  const trailing = showWorking && groups.at(-1)?.activities.length ? groups.length - 1 : -1;
+  const workingLine = <p role="status" className="flex items-center gap-2 text-sm text-muted"><span className="size-1.5 rounded-full bg-working motion-blink" /> Working</p>;
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
     <div className="mx-4 mt-2 flex shrink-0 items-center gap-2 text-muted">
       <label className="flex min-w-0 flex-1 items-center gap-2">
@@ -490,8 +495,12 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
         loadOlder();
       }}>{loadingOlder ? "Loading history…" : "Load older history"}</button>}
       <div className="space-y-6">
-        {groups.map((group) => {
+        {groups.map((group, index) => {
           const entry = group.entry;
+          if (index === trailing) return <Fragment key={group.id}>
+            {workingLine}
+            <ActivityGroup id={group.id} activities={group.activities} search={false} reading={normal.current} onCopy={(a) => void copy(entryText(a))} />
+          </Fragment>;
           return entry?.kind === "question" ? (
             <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onUseTerminal={onUseTerminal} />
           ) : entry && "text" in entry ? (
@@ -504,8 +513,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
           );
         })}
         {search && !visible.length && <p className="text-sm text-muted">No matches in loaded history.</p>}
-        {/* A running tool line at the bottom already says the agent is busy. */}
-        {working && !search && !groups.at(-1)?.activities.some((a) => a.status === "running") && <p role="status" className="flex items-center gap-2 text-sm text-muted"><span className="size-1.5 rounded-full bg-working motion-pulse" /> Working</p>}
+        {showWorking && trailing < 0 && workingLine}
       </div>
       </div>
     </div>

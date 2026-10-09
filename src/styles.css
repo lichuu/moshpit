@@ -372,6 +372,26 @@ html[data-layout="wide"] .break-all {
   }
 }
 
+@keyframes pit-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+@utility ear-tag-live {
+  &::before {
+    animation: pit-blink 2.4s ease-in-out infinite;
+  }
+}
+
+@utility motion-blink {
+  animation: pit-blink 2.4s ease-in-out infinite;
+}
+
 @keyframes pit-pulse {
   50% {
     opacity: 0.35;
@@ -427,6 +447,7 @@ html[data-layout="wide"] .break-all {
 
 @media (prefers-reduced-motion: reduce) {
   .motion-pulse,
+  .motion-blink,
   .stagger-in,
   .tap-scale {
     animation: none;
@@ -435,5 +456,9 @@ html[data-layout="wide"] .break-all {
 
   .tap-scale:active:not(:disabled) {
     scale: 1;
+  }
+
+  .ear-tag-live::before {
+    animation: none;
   }
 }
