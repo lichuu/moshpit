@@ -11,11 +11,13 @@ import {
 } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { ConfirmClose } from "@/components/moshpit/confirm-close";
+import { ContextBadge } from "@/components/moshpit/context-meter";
 import { StatusPill } from "@/components/moshpit/status-pill";
 import { Steer } from "@/components/moshpit/steer";
 import { Terminal, TerminalLinks } from "@/components/moshpit/terminal";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
+import { useAgentContext } from "@/lib/moshpit/context-meter";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import {
   targetIsCurrent,
@@ -228,6 +230,7 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
 
   const agent =
     agents.find((candidate) => candidate.id === selectedId) ?? agents[0];
+  const context = useAgentContext(agent?.id ?? "");
 
   // Each pending action carries the host and pane it was started for, and
   // reads as nothing once the detail view shows any other pane or host. That
@@ -405,7 +408,8 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
             <p className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted">
               <StatusPill status={agent.status} live className="shrink-0" />
               <AgentIcon kind={agent.kind} className="shrink-0" />
-              <span className="truncate [text-wrap:nowrap]">{label.detail}</span>
+              <span className="min-w-0 truncate [text-wrap:nowrap]">{label.detail}</span>
+              {context ? <ContextBadge context={context} /> : null}
             </p>
           </div>
           {/* Beside the whole title block, not in the name row, so it centres

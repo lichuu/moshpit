@@ -54,6 +54,7 @@ export default defineConfig({
         "bridge/terminal-typing.spec.ts",
         "bridge/chat-answer.spec.ts",
         "bridge/chat-reading.spec.ts",
+        "bridge/chat-context.spec.ts",
       ],
       // WebKit sends a service-worker-controlled page's requests through the
       // worker, where page.route cannot see them: every stubbed bridge call

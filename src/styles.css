@@ -207,6 +207,7 @@ html[data-layout="phone"][data-compact="true"] .composer-wrap {
   padding-block: 6px;
 }
 html[data-layout="phone"][data-compact="true"] .composer-wrap > p,
+html[data-layout="phone"][data-compact="true"] .composer-meter,
 html[data-layout="phone"][data-compact="true"] .composer-keys {
   display: none;
 }

@@ -26,12 +26,28 @@ export const SessionCapabilitiesSchema = z.object({
   fit: z.boolean(),
 });
 export type SessionCapabilities = z.infer<typeof SessionCapabilitiesSchema>;
+// Context use of the latest parent model call. Optional on the wire: an older
+// bridge omits it, and a value this client cannot read is dropped rather than
+// failing the whole conversation, so the meter can only ever be absent.
+const RateWindowSchema = z.object({
+  usedPercent: z.number().min(0).max(100),
+  windowMinutes: z.number().positive().optional(),
+  resetsAt: z.number().positive().optional(),
+});
+export type RateWindow = z.infer<typeof RateWindowSchema>;
+export const ContextUsageSchema = z.object({
+  used: z.number().nonnegative(),
+  capacity: z.number().positive().optional(),
+  limits: z.object({ primary: RateWindowSchema.optional(), secondary: RateWindowSchema.optional() }).optional(),
+});
+export type ContextUsage = z.infer<typeof ContextUsageSchema>;
 export const SessionResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unavailable"), agentId: z.string(), reason: z.string() }),
   z.object({
     kind: z.literal("available"), agentId: z.string(), sessionId: z.string(),
     entries: z.array(SessionEntrySchema), cursor: z.string(), before: z.string().nullable(), reset: z.boolean(),
     capabilities: SessionCapabilitiesSchema,
+    context: ContextUsageSchema.optional().catch(undefined),
   }),
 ]);
 export type SessionResponse = z.infer<typeof SessionResponseSchema>;
