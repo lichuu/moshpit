@@ -34,6 +34,14 @@ test("idle send is the native submit: text, then Enter — nothing that interrup
   assert.ok(!calls.some((c) => c.at(-1) === "alt+enter"), "an idle send must not queue");
 });
 
+test("a command's spacing and arguments reach the pane exactly as written", async () => {
+  const codex = { kind: "codex", status: "idle" };
+  for (const text of ["/model  gpt-5   high", "  /review src/a b.ts", "$skill --flag=\"two words\"\t", "/unknown-command"]) {
+    const { calls } = await callsFor("send", { agent: codex, text });
+    assert.deepEqual(calls, [["pane", "send-text", "w1:p1", text], ["pane", "send-keys", "w1:p1", "enter"]], JSON.stringify(text));
+  }
+});
+
 test("pi text arrives as a paste, so its completion list cannot take the Enter", async () => {
   // Typed, "/model " opens pi's model completions and Enter accepts the first
   // one instead of running the command.

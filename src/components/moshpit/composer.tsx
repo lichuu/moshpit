@@ -35,6 +35,10 @@ type Props = {
   agent: Agent; sessionId?: string; capabilities?: SessionCapabilities; mode?: "chat" | "terminal"; liveQuestion?: boolean;
   /** Terminal key bar slot: quick replies render there as a popover button instead of a full-width row. */
   quickRepliesSlot?: HTMLElement | null;
+  /** Chat only: the agent's live pane shown inside Chat, offered after a delivery. */
+  nativePane?: { open: boolean; onToggle: () => void };
+  /** Called once a submission is delivered, with its request ID. */
+  onDelivered?: (requestId: string) => void;
 };
 
 /**
@@ -83,7 +87,7 @@ export const Composer = memo(function Composer(props: Props) {
   return <SessionComposer key={JSON.stringify(key)} {...props} draftKey={key} />;
 });
 
-function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot }: Props & { draftKey: DraftKey }) {
+function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot, nativePane, onDelivered }: Props & { draftKey: DraftKey }) {
   const saved = useDraft(draftKey);
   const { draft } = saved;
   const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
@@ -271,8 +275,12 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       return;
     }
     const quickReply = textOverride !== undefined;
-    const text = textOverride ?? (terminal ? draft.text : draft.text.trim());
-    if (action !== "terminal" && action !== "stop" && !text && !draft.attachment) return;
+    // Trimming only decides whether there is anything to send. What goes out
+    // is the text as written, less the line breaks around it: spacing inside
+    // a command's arguments is the command's business, while a stray leading
+    // or trailing line break would submit early or twice.
+    const text = textOverride ?? (terminal ? draft.text : draft.text.replace(/^[\r\n]+|[\r\n]+$/g, ""));
+    if (action !== "terminal" && action !== "stop" && !text.trim() && !draft.attachment) return;
     pending.current = true;
     const rec = recognition.current; recognition.current = null; rec?.stop(); setListening(false);
     const id = newId();
@@ -297,6 +305,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     if (receipt.state === "delivered" && agent.status === "blocked" && action !== "terminal" && action !== "stop") {
       recordBlockedInsertion(agent);
     }
+    if (receipt.state === "delivered" && action !== "stop") onDelivered?.(id);
     // Stopping the agent must not discard the message being composed.
     if (!quickReply) saved.settle({ requestId: id, state: receipt.state, message: receipt.message }, action === "stop" ? -1 : revision);
     // A quick reply keeps the saved draft, so it never goes through settle --
@@ -642,7 +651,12 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </div>
       </div>
     </div>
-    {(draft.submission || unavailable) && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{(busy ? "Sending…" : draft.submission?.message) || (unavailable ? "Reconnect to send. Your draft stays on this device." : "")}</p>}
+    {(draft.submission || unavailable) && <div className="mt-1 flex shrink-0 items-center gap-2 px-2 text-xs text-muted">
+      <p role="status" className="min-w-0 flex-1">{(busy ? "Sending…" : draft.submission?.message) || (unavailable ? "Reconnect to send. Your draft stays on this device." : "")}</p>
+      {/* Delivered is not done: a command may have opened a menu in the pane,
+          and this is where the thumb already is. */}
+      {!terminal && nativePane && !nativePane.open && draft.submission?.state === "delivered" && <button type="button" onClick={nativePane.onToggle} className="-my-2 shrink-0 py-2 font-medium text-accent">Show pane</button>}
+    </div>}
     {saved.error && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{saved.error}</p>}
   </div>;
 }

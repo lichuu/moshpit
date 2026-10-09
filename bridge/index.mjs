@@ -119,7 +119,8 @@ const submissions = createSubmissions({
   canonical: (target) => herdr.paneId?.(target) ?? target,
   async prepareAttachment(image, request) {
     const saved = await uploads.save(image);
-    const text = request.mode === "terminal" ? request.text : request.text.trim();
+    // Trimming only decides whether a message came with the image.
+    const text = request.mode === "terminal" || request.text.trim() ? request.text : "";
     return `${text || "Please inspect this image."}\n\nAttached image on this machine: ${JSON.stringify(saved.path)}\nOpen this file to view the image.`;
   },
 });
@@ -858,7 +859,11 @@ const server = createServer(async (req, res) => {
         // Every element is checked before the first is sent, so a refused
         // key never leaves the ones before it half-delivered.
         keys.forEach((key) => herdrInput(key));
-        for (const key of keys) await submissions.write(action.target, key, recheck);
+        if (action.sessionId !== undefined && (typeof action.sessionId !== "string" || !action.sessionId || action.sessionId.length > 512))
+          throw new RequestError(400, "Invalid session.");
+        // A session-bound batch is checked once, in the lane, before its first
+        // key: keys meant for one session never reach the one that replaced it.
+        for (const [index, key] of keys.entries()) await submissions.write(action.target, key, recheck, index === 0 ? action.sessionId : undefined);
       }
       else if (action.kind === "answer") {
         if (typeof action.token !== "string" || !action.token) throw new RequestError(400, "An answer token is required.");

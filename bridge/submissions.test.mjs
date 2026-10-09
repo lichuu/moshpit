@@ -153,3 +153,46 @@ test("unknown session identity rejects native sends and stale terminal drafts", 
   assert.equal(calls.length, 0);
   assert.equal((await manager.submit(request({ mode: "terminal", sessionId: "unresolved:pane-1" }), "phone")).state, "delivered");
 });
+
+test("session-bound keys are refused once the pane runs another session", async (t) => {
+  let sessionId = "session-1";
+  const { manager, calls } = await setup(t, {
+    snapshot: async () => ({ agents: [{ id: "pane-1", sessionId }] }),
+  });
+  await manager.write("pane-1", "down", undefined, "session-1");
+  assert.deepEqual(calls, [["pane-1", "down"]]);
+
+  sessionId = "session-2";
+  await assert.rejects(manager.write("pane-1", "enter", undefined, "session-1"), { status: 409, code: "session_changed" });
+  // A pane that is gone, or one with no reported session, is not that session.
+  sessionId = undefined;
+  await assert.rejects(manager.write("pane-1", "enter", undefined, "session-1"), { status: 409 });
+  await assert.rejects(manager.write("pane-9", "enter", undefined, "session-1"), { status: 409 });
+  assert.equal(calls.length, 1, "nothing reached herdr after the session changed");
+
+  // Unbound keys are Terminal's: they follow the pane whatever runs there.
+  await manager.write("pane-1", "esc");
+  assert.deepEqual(calls.at(-1), ["pane-1", "esc"]);
+});
+
+test("the session check waits its turn in the lane", async (t) => {
+  let sessionId = "session-1";
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ready = new Promise((resolve) => { entered = resolve; });
+  const { manager, calls } = await setup(t, {
+    snapshot: async () => ({ agents: [{ id: "pane-1", sessionId }] }),
+    submit: async (...args) => { entered(); await gate; sessionId = "session-2"; calls.push(args); return { state: "delivered", message: "Sent" }; },
+  });
+  // The command ahead in the lane replaces the session; the key queued behind
+  // it was aimed at the old one and must not land on the new one.
+  const command = manager.submit(request({ text: "/new" }), "phone");
+  await ready;
+  const key = manager.write("pane-1", "enter", undefined, "session-1");
+  const refused = assert.rejects(key, { status: 409, code: "session_changed" });
+  release();
+  await command;
+  await refused;
+  assert.equal(calls.length, 1);
+});
