@@ -96,7 +96,7 @@ test("an approved browser approves a new one, which redeems once and reaches its
   await expect(requests.getByText(`Approve only if the new device shows ${phrase}.`)).toBeVisible();
   await requests.getByRole("button", { name: "Confirm approval" }).click();
 
-  await expect(asker.getByText("Attached to Alpha")).toBeVisible({ timeout: 15_000 });
+  await expect(asker.locator("[data-sonner-toast]").filter({ hasText: "Connected to Alpha" })).toBeVisible({ timeout: 15_000 });
   await expect(asker.getByRole("button", { name: "Disconnect" })).toBeVisible();
   expect(await held(asker, host)).toBeNull();
   const stored = await asker.evaluate((origin) => JSON.parse(localStorage.getItem(origin) ?? "{}"), host.url);
@@ -188,5 +188,5 @@ test("a same-tab reload resumes a pending request, and a host approval completes
   expect(await held(page, host)).toEqual(before);
 
   await admin(host, { action: "approve", requestId: before.id });
-  await expect(page.getByText("Attached to Alpha")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Connected to Alpha" })).toBeVisible({ timeout: 15_000 });
 });

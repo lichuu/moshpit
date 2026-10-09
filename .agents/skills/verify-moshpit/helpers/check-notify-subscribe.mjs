@@ -129,7 +129,7 @@ try {
   await page.getByPlaceholder("https://my-machine.tailnet.ts.net").fill(origin);
   await page.getByRole("button", { name: "Save host" }).click();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await page.getByText("Attached to push-host").waitFor({ timeout: 8000 });
+  await page.locator("[data-sonner-toast]").filter({ hasText: "Connected to push-host" }).waitFor({ timeout: 8000 });
   // Off paints optimistically, so the bridge write lands after the label.
   const waitForClearedPush = async () => {
     for (let i = 0; i < 80; i += 1) {

@@ -335,14 +335,15 @@ export function isPhone(testInfo: { project: { name: string } }) {
 }
 
 /**
- * The agent header's Shell, Rename and Close buttons. Phones keep them behind
- * a "More actions" menu so the agent's name has room; wide layouts show them
- * inline.
+ * The agent header's Shell, Rename and Close buttons. Shell sits in the header
+ * on every layout; Rename and Close live in the "Agent actions" disclosure
+ * behind "More actions", which this opens when it is closed.
  */
 export async function agentAction(
   page: import("@playwright/test").Page,
   name: string,
 ) {
+  if (/shell/i.test(name)) return page.getByRole("button", { name });
   const more = page.getByRole("button", { name: "More actions" });
   if (await more.isVisible() && (await more.getAttribute("aria-expanded")) !== "true") {
     await more.click();

@@ -2,18 +2,26 @@ import {
   ChevronLeft,
   Ellipsis,
   Link,
+  LoaderCircle,
   MessageSquareText,
   Pencil,
   SquareTerminal,
+  Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { ConfirmClose } from "@/components/moshpit/confirm-close";
 import { StatusPill } from "@/components/moshpit/status-pill";
 import { Steer } from "@/components/moshpit/steer";
 import { Terminal, TerminalLinks } from "@/components/moshpit/terminal";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
 import { useMoshpitStore } from "@/lib/moshpit/store";
+import {
+  targetIsCurrent,
+  useBoundAction,
+  type ActionTarget,
+} from "@/lib/moshpit/use-bound-action";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import type { AgentView } from "@/lib/moshpit/types";
 import { cn } from "@/lib/utils";
@@ -44,9 +52,10 @@ const VIEWS: {
   },
 ];
 
-// Icon-only: on a phone the word "Back" cost the agent's name its width. It
-// keeps the bordered button shape, matching the actions menu opposite, so it
-// still reads as something to tap.
+type ShellAttempt = ActionTarget & { phase: "busy" | "failed" };
+
+// Icon-only and quiet: on a phone the word "Back" cost the agent's name its
+// width, and the border it had read as a second primary action next to Shell.
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -59,62 +68,120 @@ function BackButton({ onClick }: { onClick: () => void }) {
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       autoFocus
-      className="flex size-10 shrink-0 items-center justify-center rounded-md text-muted shadow-border tap-scale"
+      className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-md text-muted tap-scale"
     >
-      <ChevronLeft className="size-5" />
+      <ChevronLeft className="size-6" />
+    </button>
+  );
+}
+
+const headerButton =
+  "flex h-11 shrink-0 items-center justify-center rounded-md text-muted shadow-border tap-scale";
+
+/**
+ * Shell stays one tap away. It is disabled for exactly as long as the request
+ * is in flight, so a second tap cannot open a second shell, and a failure
+ * leaves it red until the next attempt (the store also toasts the reason).
+ */
+function ShellButton({
+  phase,
+  onClick,
+}: {
+  phase: ShellAttempt["phase"] | null;
+  onClick: () => void;
+}) {
+  const busy = phase === "busy";
+  return (
+    <button
+      type="button"
+      aria-label={busy ? "Opening shell…" : "Open shell here"}
+      aria-busy={busy}
+      disabled={busy}
+      title={
+        busy
+          ? "Opening…"
+          : phase === "failed"
+            ? "The shell did not open. Tap to try again"
+            : "Interactive shell in this project; the agent keeps working"
+      }
+      onClick={onClick}
+      className={cn(
+        headerButton,
+        "min-w-11 gap-1.5 px-3 text-sm font-medium disabled:opacity-60",
+        phase === "failed" && "text-red-500",
+      )}
+    >
+      {busy ? (
+        <LoaderCircle className="size-4 animate-spin" />
+      ) : (
+        <TerminalIcon className="size-4" />
+      )}
+      <span className="hidden sm:inline">{busy ? "Opening…" : "Shell"}</span>
     </button>
   );
 }
 
 /**
- * Phone header actions. Three buttons beside the name left it a few
- * characters wide; the name is what identifies the pane, so it gets the row.
+ * Everything that is not a daily action: the full title and pane ID (selectable,
+ * since the header truncates the name), Rename and Close. A disclosure of
+ * ordinary buttons, not an ARIA menu, so it needs no arrow-key handling: Tab
+ * walks it, Escape closes it and returns focus to its button.
  */
-function ActionsMenu({ openingShell, confirmingClose, onShell, onRename, onClose }: {
-  openingShell: boolean;
-  confirmingClose: boolean;
-  onShell: () => void;
+function AgentActions({
+  title,
+  paneId,
+  closing,
+  closeRef,
+  onRename,
+  onClose,
+}: {
+  title: string;
+  paneId: string;
+  /** The close dialog is up; the panel must stay mounted for focus to return. */
+  closing: boolean;
+  closeRef: React.RefObject<HTMLButtonElement | null>;
   onRename: () => void;
   onClose: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
-  useDismiss(open, () => setOpen(false), root);
+  const toggle = useRef<HTMLButtonElement | null>(null);
+  const panelId = useId();
+  useDismiss(open && !closing, () => setOpen(false), root, () =>
+    toggle.current?.focus(),
+  );
   const item =
     "flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm tap-scale";
   return (
     <div ref={root} className="relative shrink-0">
       <button
+        ref={toggle}
         type="button"
         aria-label="More actions"
         aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex size-10 items-center justify-center rounded-md text-muted shadow-border tap-scale",
-          open && "bg-surface-2",
-        )}
+        className={cn(headerButton, "w-11", open && "bg-surface-2")}
       >
         <Ellipsis className="size-4" />
       </button>
       {open ? (
         <div
+          id={panelId}
           role="group"
           aria-label="Agent actions"
-          className="absolute right-0 top-12 z-30 w-52 rounded-xl border border-border bg-bg p-1.5 shadow-lg"
+          className="absolute right-0 top-12 z-30 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-bg p-1.5 shadow-lg"
         >
-          <button
-            type="button"
-            aria-label={openingShell ? "Opening shell…" : "Open shell here"}
-            onClick={() => {
-              setOpen(false);
-              onShell();
-            }}
-            className={item}
-          >
-            <SquareTerminal className="size-4 text-muted" />
-            {openingShell ? "Opening…" : "Open shell here"}
-          </button>
+          <div className="px-2.5 pb-2 pt-1.5">
+            <p className="text-2xs text-subtle">Title</p>
+            <p className="select-text break-words text-sm">{title}</p>
+            <p className="mt-2 text-2xs text-subtle">Pane</p>
+            <p className="select-text break-all font-mono text-xs text-muted">
+              {paneId}
+            </p>
+          </div>
+          <div className="mx-1 mb-1 h-px bg-border" />
           <button
             type="button"
             aria-label="Rename agent"
@@ -127,19 +194,15 @@ function ActionsMenu({ openingShell, confirmingClose, onShell, onRename, onClose
             <Pencil className="size-4 text-muted" />
             Rename
           </button>
-          {/* The first tap arms, the second closes: the menu stays open so the
-              confirm lands where the finger already is. */}
           <button
+            ref={closeRef}
             type="button"
-            aria-label={confirmingClose ? "Really close?" : "Close pane"}
-            onClick={() => {
-              if (confirmingClose) setOpen(false);
-              onClose();
-            }}
-            className={cn(item, confirmingClose && "text-red-500")}
+            aria-label="Close pane"
+            onClick={onClose}
+            className={cn(item, "text-red-500")}
           >
             <X className="size-4" />
-            {confirmingClose ? "Really close?" : "Close pane"}
+            Close pane
           </button>
         </div>
       ) : null}
@@ -151,6 +214,7 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const agents = useMoshpitStore((state) => state.agents);
   const selectedId = useMoshpitStore((state) => state.selectedAgentId);
   const selectedShellId = useMoshpitStore((state) => state.selectedShellId);
+  const hostId = useMoshpitStore((state) => state.connectedHostId);
   const shells = useMoshpitStore((state) => state.shells);
   const shell = selectedShellId
     ? shells.find((s) => s.id === selectedShellId)
@@ -161,40 +225,32 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const renameAgent = useMoshpitStore((state) => state.renameAgent);
   const closeAgent = useMoshpitStore((state) => state.closeAgent);
   const openShell = useMoshpitStore((state) => state.openShell);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
-  // Keyed by the pane the confirm was armed for. One shared boolean meant a
-  // confirm armed on a shell was still live when the user switched to an
-  // agent, so a single tap closed that agent's pane with no confirmation.
-  const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
-  const renameSettled = useRef(false);
-  useEffect(() => {
-    if (!closeConfirm) return;
-    const timer = window.setTimeout(() => setCloseConfirm(null), 4000);
-    return () => window.clearTimeout(timer);
-  }, [closeConfirm]);
-  // A shell in a dead pane (closed on the host) still shows as a target the
-  // user can recreate from: the open action re-checks the pane.
-  const [openingShell, setOpeningShell] = useState(false);
-  useEffect(() => {
-    if (!openingShell) return;
-    const timer = window.setTimeout(() => setOpeningShell(false), 10000);
-    return () => window.clearTimeout(timer);
-  }, [openingShell]);
 
   const agent =
     agents.find((candidate) => candidate.id === selectedId) ?? agents[0];
 
-  const onCloseTap = (target: string) => {
-    if (closeConfirm !== target) {
-      setCloseConfirm(target);
-      return;
-    }
-    setCloseConfirm(null);
-    void closeAgent(target);
+  // Each pending action carries the host and pane it was started for, and
+  // reads as nothing once the detail view shows any other pane or host. That
+  // covers the old bug where a confirmation armed on one pane closed another.
+  const shown: ActionTarget | null = shell
+    ? { hostId, id: shell.id }
+    : agent
+      ? { hostId, id: agent.id }
+      : null;
+  const [renaming, setRenaming] = useBoundAction<ActionTarget & { draft: string }>(shown);
+  const [closing, setClosing] = useBoundAction<ActionTarget>(shown);
+  const [shellAttempt, setShellAttempt] = useBoundAction<ShellAttempt>(shown);
+  const renameSettled = useRef(false);
+  const closeTrigger = useRef<HTMLButtonElement | null>(null);
+
+  const confirmClose = (target: ActionTarget) => {
+    setClosing(null);
+    // The store may have moved on between render and tap.
+    if (targetIsCurrent(target)) void closeAgent(target.id);
   };
 
   if (shell) {
+    const target = { hostId, id: shell.id };
     return (
       <section
         className="flex min-h-0 flex-1 flex-col bg-bg"
@@ -220,15 +276,13 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
                   companion shell
                 </span>
                 <button
+                  ref={closeTrigger}
                   type="button"
-                  aria-label={closeConfirm === shell.id ? "Really close?" : "Close shell"}
-                  onClick={() => onCloseTap(shell.id)}
-                  className={cn(
-                    "flex h-10 shrink-0 items-center justify-center rounded-md px-2 text-sm font-medium shadow-border tap-scale",
-                    closeConfirm === shell.id ? "text-red-500" : "text-muted",
-                  )}
+                  aria-label="Close shell"
+                  onClick={() => setClosing(target)}
+                  className={cn(headerButton, "w-11")}
                 >
-                  {closeConfirm === shell.id ? "Really close?" : <X className="size-4" />}
+                  <X className="size-4" />
                 </button>
               </div>
               <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
@@ -245,6 +299,15 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
           </div>
         </header>
         <Terminal />
+        <ConfirmClose
+          open={closing !== null}
+          title="Close this shell?"
+          description="Close ends the shell pane and anything running in it. The files in its checkout stay as they are."
+          confirmLabel="Close shell"
+          onCancel={() => setClosing(null)}
+          onConfirm={() => closing && confirmClose(closing)}
+          restoreFocus={() => closeTrigger.current}
+        />
       </section>
     );
   }
@@ -252,16 +315,18 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   if (!agent) return null;
 
   const label = paneLabel(agent, agents);
+  const target = { hostId, id: agent.id };
   const openRename = () => {
     renameSettled.current = false;
-    setDraft(label.name);
-    setRenaming(true);
+    setRenaming({ ...target, draft: label.name });
   };
   const settleRename = (commit: boolean) => {
-    if (renameSettled.current) return;
+    if (renameSettled.current || !renaming) return;
     renameSettled.current = true;
-    setRenaming(false);
-    if (commit) void renameAgent(agent.id, draft);
+    setRenaming(null);
+    if (commit && targetIsCurrent(renaming)) {
+      void renameAgent(renaming.id, renaming.draft);
+    }
   };
   const onRenameKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
@@ -272,8 +337,16 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
     }
   };
   const openShellHere = () => {
-    setOpeningShell(true);
-    void openShell(agent.cwd).finally(() => setOpeningShell(false));
+    const attempt: ShellAttempt = { ...target, phase: "busy" };
+    setShellAttempt(attempt);
+    // Settles on the real outcome of the request. A newer attempt, or a
+    // different pane on screen by then, has already replaced or cleared this
+    // one, and the store keeps the user where they are.
+    void openShell(agent.cwd, () => targetIsCurrent(target)).then((ok) =>
+      setShellAttempt((now) =>
+        now === attempt ? (ok ? null : { ...attempt, phase: "failed" }) : now,
+      ),
+    );
   };
 
   return (
@@ -293,108 +366,69 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
             <BackButton onClick={closeDetail} />
           ) : null}
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              {renaming ? (
-                <>
-                  <input
-                    autoFocus
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    maxLength={100}
-                    aria-label="New name"
-                    onKeyDown={onRenameKey}
-                    className="w-full min-w-0 border-b border-border bg-transparent text-base font-medium tracking-tight outline-none"
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      aria-label="Cancel rename"
-                      onClick={() => settleRename(false)}
-                      className="flex h-9 shrink-0 items-center rounded-md px-2 text-sm font-medium text-muted shadow-border tap-scale"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Save rename"
-                      onClick={() => settleRename(true)}
-                      disabled={!draft.trim()}
-                      className="flex h-9 shrink-0 items-center rounded-md px-2 text-sm font-medium text-muted shadow-border tap-scale disabled:opacity-40"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <h2 className="truncate text-base font-medium tracking-tight">
-                  {label.name}
-                </h2>
-              )}
-              {/* Renaming borrows the whole row. These sat beside the input and
-                  squeezed it to zero width at phone sizes, so the field you were
-                  meant to type in was not visible at all. They are also the wrong
-                  controls to leave live mid-rename. */}
-              {!renaming && (
-                <>
-                <StatusPill status={agent.status} live className="shrink-0" />
-                {phone ? null : (
-                  <>
-                    <button
-                      type="button"
-                      aria-label={openingShell ? "Opening shell…" : "Open shell here"}
-                      title={
-                        openingShell
-                          ? "Opening…"
-                          : "Interactive shell in this project; the agent keeps working"
-                      }
-                      onClick={openShellHere}
-                      className="flex h-10 shrink-0 items-center justify-center rounded-md px-2 text-sm font-medium text-muted shadow-border tap-scale disabled:opacity-50"
-                    >
-                      {openingShell ? "Opening…" : "Shell"}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Rename agent"
-                      onClick={openRename}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-sm font-medium text-muted shadow-border tap-scale"
-                    >
-                      <Pencil className="size-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={closeConfirm === agent.id ? "Really close?" : "Close pane"}
-                      onClick={() => onCloseTap(agent.id)}
-                      className={cn(
-                        "flex h-10 shrink-0 items-center justify-center rounded-md px-2 text-sm font-medium shadow-border tap-scale",
-                        closeConfirm === agent.id ? "text-red-500" : "text-muted",
-                      )}
-                    >
-                      {closeConfirm === agent.id ? "Really close?" : <X className="size-4" />}
-                    </button>
-                  </>
-                )}
-                </>
-              )}
-            </div>
-            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+            {renaming ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <input
+                  autoFocus
+                  value={renaming.draft}
+                  onChange={(event) =>
+                    setRenaming({ ...renaming, draft: event.target.value })
+                  }
+                  maxLength={100}
+                  aria-label="New name"
+                  onKeyDown={onRenameKey}
+                  className="h-11 w-full min-w-0 border-b border-border bg-transparent text-lg font-medium tracking-tight outline-none"
+                />
+                <button
+                  type="button"
+                  aria-label="Cancel rename"
+                  onClick={() => settleRename(false)}
+                  className={cn(headerButton, "px-3 text-sm font-medium")}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  aria-label="Save rename"
+                  onClick={() => settleRename(true)}
+                  disabled={!renaming.draft.trim()}
+                  className={cn(headerButton, "px-3 text-sm font-medium disabled:opacity-40")}
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <h2 className="line-clamp-2 break-words text-lg font-medium leading-tight tracking-tight">
+                {label.name}
+              </h2>
+            )}
+            <p className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted">
+              <StatusPill status={agent.status} live className="shrink-0" />
               <AgentIcon kind={agent.kind} className="shrink-0" />
-              <span className="truncate [text-wrap:nowrap]">
-                {label.detail}
-                <span className="text-subtle"> · {agent.paneId}</span>
-              </span>
+              <span className="truncate [text-wrap:nowrap]">{label.detail}</span>
             </p>
           </div>
           {/* Beside the whole title block, not in the name row, so it centres
-              on both lines the way Back does opposite. */}
-          {phone && !renaming ? (
-            <ActionsMenu
-              openingShell={openingShell}
-              confirmingClose={closeConfirm === agent.id}
-              onShell={openShellHere}
-              onRename={openRename}
-              onClose={() => onCloseTap(agent.id)}
-            />
-          ) : null}
+              on both lines the way Back does opposite. Renaming borrows the
+              row for the field, and these are the wrong controls to leave
+              live mid-rename. */}
+          {renaming ? null : (
+            <>
+              <ShellButton
+                phase={shellAttempt?.phase ?? null}
+                onClick={openShellHere}
+              />
+              <AgentActions
+                key={agent.id}
+                title={label.name}
+                paneId={agent.paneId}
+                closing={closing !== null}
+                closeRef={closeTrigger}
+                onRename={openRename}
+                onClose={() => setClosing(target)}
+              />
+            </>
+          )}
         </div>
 
         <nav aria-label="Agent views" className="detail-views mt-4 flex gap-4">
@@ -430,6 +464,16 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
       ) : (
         <Steer view={detailView} />
       )}
+
+      <ConfirmClose
+        open={closing !== null}
+        title={`Close ${label.name}?`}
+        description="Close ends the pane and the agent running in it. The files in its checkout stay as they are."
+        confirmLabel="Close pane"
+        onCancel={() => setClosing(null)}
+        onConfirm={() => closing && confirmClose(closing)}
+        restoreFocus={() => closeTrigger.current}
+      />
     </section>
   );
 }

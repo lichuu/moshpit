@@ -51,6 +51,12 @@ let settingsDirty = false;
 // a still-open shell once an earlier one was closed.
 let demoShellSeq = 0;
 
+// Short on purpose: the success is confirmation, not a message to read, and the
+// other toasts (errors, the release notice) keep their own, longer lifetimes.
+function announceConnected(label: string) {
+  toast.success(`Connected to ${label}`, { id: "host-connected", duration: 2500 });
+}
+
 const parseBlob = (raw: string | null) => {
   try {
     return raw ? (JSON.parse(raw) as { state?: { settings?: Settings } }) : null;
@@ -195,7 +201,11 @@ type MoshpitState = {
   setJumpOpen: (open: boolean) => void;
   selectAgent: (id: string) => void;
   selectShell: (id: string) => void;
-  openShell: (cwd: string) => Promise<boolean>;
+  /**
+   * `isCurrent`, when given, is asked once the open succeeds: a caller whose
+   * target changed meanwhile gets the shell created but is not moved into it.
+   */
+  openShell: (cwd: string, isCurrent?: () => boolean) => Promise<boolean>;
   /**
    * `explicit` is a Connect the user pressed; `silent` is startup or an
    * automatic reconnect. Only an explicit attempt announces its success.
@@ -816,7 +826,7 @@ export const useMoshpitStore = create<MoshpitState>()(
 
       // One reusable shell per canonical cwd: a repeat tap re-attaches, and a
       // dead or closed shell is recreated by the bridge.
-      openShell: async (cwd) => {
+      openShell: async (cwd, isCurrent) => {
         const directory = cwd.trim().replace(/\/+$/, "");
         if (!directory) return false;
         const host = liveHost(get());
@@ -856,9 +866,12 @@ export const useMoshpitStore = create<MoshpitState>()(
             // shells and kinds on top of the one now connected, and select a
             // pane that does not exist there.
             if (get().connectedHostId !== host.id) return true;
+            // The user moved to another pane while the shell opened; do not
+            // pull them out of it into a shell they did not just ask for.
+            const enter = isCurrent ? isCurrent() : true;
             if (snap) {
-              set(applySnapshot(get(), snap, paneId ? { selectedShellId: paneId, detailAgentId: paneId, detailView: "terminal" } : {}));
-            } else if (paneId) {
+              set(applySnapshot(get(), snap, paneId && enter ? { selectedShellId: paneId, detailAgentId: paneId, detailView: "terminal" } : {}));
+            } else if (paneId && enter) {
               set({ selectedShellId: paneId, detailAgentId: paneId, detailView: "terminal" });
             }
             return true;
@@ -966,12 +979,7 @@ export const useMoshpitStore = create<MoshpitState>()(
               });
               // One success per explicit attempt, under one ID, so a
               // repeated Connect replaces rather than stacks it.
-              if (intent === "explicit") {
-                toast(`Attached to ${host.label}`, {
-                  id: "host-connected",
-                  description: `snapshot · ${snap.agents.length} agents`,
-                });
-              }
+              if (intent === "explicit") announceConnected(host.label);
               if (get().settings.notify) {
                 void registerPush(url).then((setup) => {
                   if (get().settings.notify) set({ pushSetup: setup });
@@ -1067,12 +1075,7 @@ export const useMoshpitStore = create<MoshpitState>()(
               h.id === id ? { ...h, lastSeenAt: Date.now() } : h,
             ),
           });
-          if (intent === "explicit") {
-            toast("Attached to Demo herdr", {
-              id: "host-connected",
-              description: "herdr api snapshot · 6 agents",
-            });
-          }
+          if (intent === "explicit") announceConnected(host.label);
         }, 420);
       },
 

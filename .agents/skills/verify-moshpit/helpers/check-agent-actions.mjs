@@ -83,14 +83,20 @@ const steps = [
     label: "close-arm",
     act: async (p) => (await action(p, "Close pane")).click(),
     expect: async (p) => {
-      const confirm = p.getByRole("button", { name: "Really close" });
+      const confirm = p
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Close pane" });
       await confirm.waitFor({ state: "visible" });
       return confirm;
     },
   },
   {
     label: "close-confirm",
-    act: (p) => p.getByRole("button", { name: "Really close" }).click(),
+    act: (p) =>
+      p
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Close pane" })
+        .click(),
     expect: async (p) => {
       // Closing the phone detail agent unmounts the dialog back to the list.
       await p
