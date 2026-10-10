@@ -172,6 +172,31 @@
 .workspace-nav > button[aria-current="page"] {
   color: var(--color-accent);
 }
+/* C9: the pull-request pill. Green, yellow and gray are the theme's working,
+   blocked and muted colours. Red and purple are the palette's own red and
+   magenta (--ansi-1, --ansi-5), which paintTheme sets for every theme and
+   picks a darker pair for light schemes; the fallbacks are the default
+   theme's, for the first frame. */
+.pr-pill {
+  color: var(--pr-tone);
+  background: color-mix(in srgb, var(--pr-tone) 14%, transparent);
+}
+.pr-pill[data-readiness="ready"] {
+  --pr-tone: var(--color-working);
+}
+.pr-pill[data-readiness="pending"] {
+  --pr-tone: var(--color-blocked);
+}
+.pr-pill[data-readiness="blocked"] {
+  --pr-tone: var(--ansi-1, #ef9a94);
+}
+.pr-pill[data-readiness="draft"],
+.pr-pill[data-readiness="closed"] {
+  --pr-tone: var(--color-muted);
+}
+.pr-pill[data-readiness="merged"] {
+  --pr-tone: var(--ansi-5, #cfabe0);
+}
 .agent-card {
   transition:
     background-color 150ms,

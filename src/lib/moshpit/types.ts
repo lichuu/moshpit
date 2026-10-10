@@ -86,6 +86,12 @@ export type AgentEvent = {
   resolved?: EventResolution;
 };
 
+/** What the bridge makes of a pull request: one word, so the client holds no forge logic. */
+export type PullRequestReadiness = "ready" | "pending" | "blocked" | "draft" | "merged" | "closed";
+
+/** The pull request for an agent's branch, when the bridge found one. */
+export type PullRequest = { number: number; readiness: PullRequestReadiness; url: string };
+
 export type Agent = {
   id: string;
   sessionId?: string;
@@ -98,6 +104,8 @@ export type Agent = {
   cwd: string;
   projectRoot?: string;
   branch: string;
+  /** The branch's pull request. Absent when the bridge has none, or does not report them. */
+  pullRequest?: PullRequest;
   /** The pane's own terminal title, when herdr reports one. */
   title?: string;
   /** pi's current model, read from its session file, when known. */
