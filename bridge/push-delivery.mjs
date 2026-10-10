@@ -73,6 +73,40 @@ export function parsePushSubscription(sub) {
   };
 }
 
+/**
+ * How much of an alert a device's lock screen may show. Stored beside the
+ * subscription; an entry saved before the setting existed, or one holding a
+ * value this build does not know, reads as "full".
+ */
+export const PUSH_PRIVACY_LEVELS = Object.freeze(["full", "name", "generic"]);
+
+/** Validates a level a client sent. Missing is the caller's business; anything else must be a known level. */
+export function parsePushPrivacy(level) {
+  if (typeof level === "string" && PUSH_PRIVACY_LEVELS.includes(level)) return level;
+  throw new PushError(400, "push_privacy_invalid", `Notification text must be one of ${PUSH_PRIVACY_LEVELS.join(", ")}.`);
+}
+
+/** The level a saved entry sends at. */
+export function pushPrivacyOf(entry) {
+  return PUSH_PRIVACY_LEVELS.includes(entry?.privacy) ? entry.privacy : "full";
+}
+
+/**
+ * Builds the payload a device at `level` receives from the full one. Fields
+ * are copied, never blanked, so a withheld value is not in the encrypted body
+ * at all. `type` only picks the wording; `url` is an opaque in-app address
+ * that the worker opens on a tap and never displays. At "generic" the agent
+ * id goes too, since the url already carries what a tap needs.
+ */
+export function pushPayloadFor(payload, level) {
+  const { type, agent, name, prompt, url } = payload;
+  const allowed =
+    level === "generic" ? { type, url }
+    : level === "name" ? { type, agent, name, url }
+    : { type, agent, name, prompt, url };
+  return Object.fromEntries(Object.entries(allowed).filter(([, value]) => value !== undefined));
+}
+
 const sameSubscription = (a, b) =>
   Boolean(a?.keys && b?.keys) && a.endpoint === b.endpoint && a.keys.p256dh === b.keys.p256dh && a.keys.auth === b.keys.auth;
 
@@ -341,12 +375,14 @@ export function createPushDelivery({ pushStore, devices, activeDevice, send, rep
     const gone = new Set();
     let sent = 0;
     for (const payload of payloads) {
-      const body = JSON.stringify(payload);
       for (const recipient of recipients) {
         if (gone.has(recipient)) continue;
         // Nothing may await between this check and the request web-push
         // creates synchronously inside send().
         if (!current(recipient)) continue;
+        // Read at send time, so a device that raised its privacy while earlier
+        // sends were in flight gets the stricter payload.
+        const body = JSON.stringify(pushPayloadFor(payload, pushPrivacyOf(pushStore.get(recipient.deviceId))));
         try {
           sent += 1;
           await send(recipient.subscription, body);

@@ -159,6 +159,8 @@ export type Settings = {
   voice: boolean;
   /** Intent only. Delivery truth is session `pushSetup`. */
   notify: boolean;
+  /** What a notification on this device may show; the connected host holds the same value. */
+  notifyText: PushPrivacy;
   theme: ThemeId;
   autoSwitch: boolean;
 };
@@ -176,9 +178,13 @@ export type PushSetup =
   | { status: "local" }
   | { status: "on" };
 
+/** Full text, the agent's name only, or no agent detail at all. */
+export type PushPrivacy = "full" | "name" | "generic";
+
 export type PairPush =
   | { action: "retain" }
-  | { action: "set"; subscription: PushSubscriptionJSON }
+  | { action: "set"; subscription: PushSubscriptionJSON; privacy?: PushPrivacy }
+  | { action: "privacy"; privacy: PushPrivacy }
   | { action: "clear" };
 
 export const BRIDGE_PROBE_MS = 4000;

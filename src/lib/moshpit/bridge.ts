@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Agent, AgentDetail, Attachment, Host, PairPush, PushSetup, Shell } from "./types";
+import type { Agent, AgentDetail, Attachment, Host, PairPush, PushPrivacy, PushSetup, Shell } from "./types";
 import { BRIDGE_PROBE_MS } from "./types";
 import { breadcrumb } from "./blackbox";
 import { accessError, credentials, identityHeaders, requireReady, saveCredentials, setHostAccess } from "./access";
@@ -363,7 +363,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 const registerInflight = new Map<string, Promise<PushSetup>>();
 
 /** Coalesced per url, so two hosts never share one result. */
-export function registerPush(url: string): Promise<PushSetup> {
+export function registerPush(url: string, privacy?: PushPrivacy): Promise<PushSetup> {
   try { requireReady(url); } catch (error) { return Promise.resolve({ status: "failed", message: (error as Error).message }); }
   const inflight = registerInflight.get(url);
   if (inflight) return inflight;
@@ -393,7 +393,7 @@ export function registerPush(url: string): Promise<PushSetup> {
       const subscription = sub.toJSON();
       if (!subscription.endpoint)
         return { status: "failed", message: "no subscription endpoint" };
-      await updatePushSubscription(url, { action: "set", subscription });
+      await updatePushSubscription(url, { action: "set", subscription, privacy });
       return { status: "on" };
     } catch (err) {
       return {
@@ -422,7 +422,11 @@ export async function unregisterPush(url: string): Promise<void> {
 
 export async function updatePushSubscription(url: string, push: PairPush) {
   const body: Record<string, unknown> = {};
-  if (push.action === "set") body.pushSubscription = push.subscription;
+  if (push.action === "set") {
+    body.pushSubscription = push.subscription;
+    if (push.privacy) body.pushPrivacy = push.privacy;
+  }
+  if (push.action === "privacy") body.pushPrivacy = push.privacy;
   if (push.action === "clear") body.clearPush = true;
   const res = await fetch(`${url}/api/push-subscription`, { method: "POST", headers: headers(url), redirect: "error", body: JSON.stringify(body) });
   if (!res.ok) throw await accessError(res, url, "push subscription");

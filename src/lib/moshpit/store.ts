@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { toast } from "sonner";
 import { CURRENT_RELEASE } from "@/lib/moshpit/releases";
 import { inboxUnread, makeEvent, newId } from "./events";
-import { encodeImage, fetchSnapshot, fetchRequesterLogin, inspectPushSupport, consumePairing, discoverAccess, checkDeviceCredential, postAction, postLogin, postLogout, registerPush, type KeyInput, type Snapshot, connectRefusal, diagnoseBridge, unregisterPush } from "./bridge";
+import { encodeImage, fetchSnapshot, fetchRequesterLogin, inspectPushSupport, consumePairing, discoverAccess, checkDeviceCredential, postAction, postLogin, postLogout, registerPush, updatePushSubscription, type KeyInput, type Snapshot, connectRefusal, diagnoseBridge, unregisterPush } from "./bridge";
 import { mergeLinks, pruneStaleLinks, splitLinkKey } from "./links";
 import { credentials, hostAccess, watchAccess, setHostAccess } from "./access";
 import { breadcrumb, startBlackBox } from "./blackbox";
@@ -34,6 +34,7 @@ import type {
   Attachment,
   Host,
   HostAccess,
+  PushPrivacy,
   PushSetup,
   Settings,
   Shell,
@@ -189,6 +190,8 @@ type MoshpitState = {
   settings: Settings;
   pushSetup: PushSetup;
   enablePush: () => Promise<void>;
+  /** Changes what this device's notifications show. Resolves false, with the old value kept, when the host refuses. */
+  setNotifyText: (level: PushPrivacy) => Promise<boolean>;
   disablePush: () => Promise<void>;
   snippets: Snippet[];
   saveSnippet: (input: { id?: string; name: string; text: string }) => boolean;
@@ -653,6 +656,7 @@ export const useMoshpitStore = create<MoshpitState>()(
         prefix: "ctrl+b",
         voice: true,
         notify: false,
+        notifyText: "full",
         theme: "moshpit-dark",
         // Off, or a light device would resolve the dark default to its light
         // sibling and the app would not open dark for anyone but dark-mode
@@ -724,9 +728,26 @@ export const useMoshpitStore = create<MoshpitState>()(
           set({ pushSetup: { status: "local" } });
           return;
         }
-        const setup = await registerPush(url);
+        const setup = await registerPush(url, get().settings.notifyText);
         if (!get().settings.notify) return;
         set({ pushSetup: setup });
+      },
+      setNotifyText: async (level) => {
+        const host = get().hosts.find((h) => h.id === get().connectedHostId);
+        const url = host?.tailnetUrl?.replace(/\/$/, "");
+        if (!url) return false;
+        try {
+          await updatePushSubscription(url, { action: "privacy", privacy: level });
+        } catch (error) {
+          breadcrumb(`push privacy ${error instanceof Error ? error.message : "failed"}`);
+          toast.error("Notification text not changed", {
+            description: error instanceof Error ? error.message : "The host did not accept it.",
+          });
+          return false;
+        }
+        settingsDirty = true;
+        set((s) => ({ settings: { ...s.settings, notifyText: level } }));
+        return true;
       },
       disablePush: async () => {
         settingsDirty = true;
@@ -981,7 +1002,7 @@ export const useMoshpitStore = create<MoshpitState>()(
               // repeated Connect replaces rather than stacks it.
               if (intent === "explicit") announceConnected(host.label);
               if (get().settings.notify) {
-                void registerPush(url).then((setup) => {
+                void registerPush(url, get().settings.notifyText).then((setup) => {
                   if (get().settings.notify) set({ pushSetup: setup });
                 });
               }
@@ -1964,6 +1985,10 @@ export const useMoshpitStore = create<MoshpitState>()(
           settings: {
             ...current.settings,
             ...p.settings,
+            // Persisted settings are untrusted; an unknown level reads as full.
+            notifyText: ["full", "name", "generic"].includes(p.settings?.notifyText as string)
+              ? (p.settings?.notifyText as PushPrivacy)
+              : "full",
           },
         };
       },
