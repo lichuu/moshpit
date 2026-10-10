@@ -212,3 +212,52 @@ test("startup drops subscriptions whose device is revoked or unknown", async () 
     await stop(second.child, scratch);
   }
 });
+
+test("a device saves and changes its notification text level, and a bad one is refused", async () => {
+  const { child, scratch, origin } = await startBridge();
+  try {
+    const credential = await pairDevice(origin, headers, { stateDir: scratch, name: "private" });
+    const deviceId = credential.split(".")[0];
+    const sub = subscription("p");
+
+    // A level has nothing to attach to until the device has a subscription.
+    const early = await register(origin, credential, { pushPrivacy: "generic" });
+    assert.equal(early.status, 409);
+    assert.equal((await early.json()).error.code, "push_not_subscribed");
+    assert.deepEqual(await saved(scratch), {});
+
+    const bad = await register(origin, credential, { pushSubscription: sub, pushPrivacy: "everything" });
+    assert.equal(bad.status, 400);
+    const { error } = await bad.json();
+    assert.equal(error.code, "push_privacy_invalid");
+    assert.equal(typeof error.message, "string");
+    assert.deepEqual(await saved(scratch), {}, "a refused level saves nothing");
+
+    // No level sent: the entry carries none, which reads as full.
+    await registered(origin, credential, { pushSubscription: sub });
+    assert.equal((await saved(scratch))[deviceId].privacy, undefined);
+
+    await registered(origin, credential, { pushPrivacy: "name" });
+    assert.equal((await saved(scratch))[deviceId].privacy, "name");
+    assert.equal((await saved(scratch))[deviceId].endpoint, sub.endpoint);
+
+    // Re-registering without a level, as an older client does, keeps it.
+    const renewed = subscription("p2");
+    await registered(origin, credential, { pushSubscription: renewed });
+    assert.equal((await saved(scratch))[deviceId].endpoint, renewed.endpoint);
+    assert.equal((await saved(scratch))[deviceId].privacy, "name");
+
+    await registered(origin, credential, { pushSubscription: renewed, pushPrivacy: "generic" });
+    assert.equal((await saved(scratch))[deviceId].privacy, "generic");
+
+    const wrongType = await register(origin, credential, { pushPrivacy: null });
+    assert.equal(wrongType.status, 400);
+    assert.equal((await wrongType.json()).error.code, "push_privacy_invalid");
+    assert.equal((await saved(scratch))[deviceId].privacy, "generic", "a refused change keeps the old level");
+
+    await registered(origin, credential, { clearPush: true });
+    assert.equal((await saved(scratch))[deviceId], undefined);
+  } finally {
+    await stop(child, scratch);
+  }
+});

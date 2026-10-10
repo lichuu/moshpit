@@ -24,7 +24,7 @@ import {
   type DeviceRecord,
 } from "@/lib/moshpit/bridge";
 import { DEFAULT_THEME, THEME_LIST, isThemeId } from "@/lib/moshpit/themes";
-import type { Host, TermSize } from "@/lib/moshpit/types";
+import type { Host, PushPrivacy, TermSize } from "@/lib/moshpit/types";
 import { cn, formatAgo } from "@/lib/utils";
 
 // Terms the app offers. The bridge accepts any whole number of days, so this
@@ -170,6 +170,12 @@ const TERM: { id: TermSize; label: string }[] = [
   { id: "sm", label: "S" },
   { id: "md", label: "M" },
   { id: "lg", label: "L" },
+];
+
+const NOTIFY_TEXT: { id: PushPrivacy; label: string; help: string }[] = [
+  { id: "full", label: "Full", help: "A lock screen shows the agent’s name and what it needs." },
+  { id: "name", label: "Agent name only", help: "A lock screen shows the agent’s name, not what it needs." },
+  { id: "generic", label: "Generic", help: "A lock screen shows only “An agent is blocked.”" },
 ];
 
 type BarcodeDetectorLike = {
@@ -787,6 +793,7 @@ export function Hosts() {
   const settings = useMoshpitStore((s) => s.settings);
   const pushSetup = useMoshpitStore((s) => s.pushSetup);
   const enablePush = useMoshpitStore((s) => s.enablePush);
+  const setNotifyText = useMoshpitStore((s) => s.setNotifyText);
   const disablePush = useMoshpitStore((s) => s.disablePush);
   const updateSettings = useMoshpitStore((s) => s.updateSettings);
   const simulateBlocked = useMoshpitStore((s) => s.simulateBlocked);
@@ -795,6 +802,7 @@ export function Hosts() {
   const demoHost = useMoshpitStore((s) => s.hosts.some((h) => h.demo));
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [notifyTextBusy, setNotifyTextBusy] = useState(false);
   const [prefixDraft, setPrefixDraft] = useState(settings.prefix);
   const [passwordDraft, setPasswordDraft] = useState("");
   const notifyControl = pushControl(pushSetup);
@@ -1119,6 +1127,37 @@ export function Hosts() {
         </label>
         {notifyControl.note ? (
           <p className="px-1 text-2xs text-subtle">{notifyControl.note}</p>
+        ) : null}
+        {pushSetup.status === "on" ? (
+          <div className="flex flex-col gap-2 rounded-xl bg-surface px-3 py-2 shadow-border">
+            <span className="text-sm" id="notify-text-label">Notification text</span>
+            <div className="flex gap-1" role="group" aria-labelledby="notify-text-label">
+              {NOTIFY_TEXT.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={settings.notifyText === option.id}
+                  disabled={notifyTextBusy}
+                  onClick={() => {
+                    if (settings.notifyText === option.id) return;
+                    setNotifyTextBusy(true);
+                    void setNotifyText(option.id).finally(() => setNotifyTextBusy(false));
+                  }}
+                  className={cn(
+                    "min-h-9 flex-1 rounded-sm px-2 py-1 text-xs font-medium",
+                    settings.notifyText === option.id
+                      ? "bg-accent text-accent-fg"
+                      : "bg-surface-2 text-muted shadow-border",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-2xs text-subtle">
+              {NOTIFY_TEXT.find((option) => option.id === settings.notifyText)?.help}
+            </p>
+          </div>
         ) : null}
         <p className="px-1 text-2xs text-subtle">
           Open source. Your agents run on your machines.

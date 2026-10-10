@@ -80,18 +80,25 @@ self.addEventListener("push", (event) => {
   }
   if (data.type !== "block" && data.type !== "turn") return;
   const blocked = data.type === "block";
-  const title = data.name ?? data.agent ?? "moshpit";
+  // The bridge leaves out what this device's privacy level withholds, so a
+  // payload may carry no name, no prompt and no agent id. A field that is
+  // missing, empty or not a string is treated as absent.
+  const text = (value) =>
+    typeof value === "string" && value.trim() ? value : undefined;
+  const agent = text(data.agent);
+  const url = text(data.url) ?? "/";
+  const title = text(data.name) ?? agent ?? "moshpit";
   const body =
-    data.prompt ??
+    text(data.prompt) ??
     (blocked ? "An agent is blocked." : "An agent finished its turn.");
-  const url = data.url ?? "/";
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      tag: `${data.type}:${data.agent ?? ""}`,
+      // Without an agent id the address still tells agents apart.
+      tag: `${data.type}:${agent ?? url}`,
       renotify: blocked,
       requireInteraction: blocked,
-      data: { url, agent: data.agent },
+      data: { url, agent },
     }),
   );
 });

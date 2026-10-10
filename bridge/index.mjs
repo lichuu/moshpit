@@ -12,7 +12,7 @@ import { isSea } from "node:sea";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
-import { createPushDelivery, createPushReporter, createPushSender, createTransitionTracker, openPushStore, parsePushSubscription, PushError, pushAvailability } from "./push-delivery.mjs";
+import { createPushDelivery, createPushReporter, createPushSender, createTransitionTracker, openPushStore, parsePushPrivacy, parsePushSubscription, pushPrivacyOf, PushError, pushAvailability } from "./push-delivery.mjs";
 import { createHerdr, herdrInput, isHerdrKind } from "./herdr.mjs";
 import { listAgentCommands, scopedCatalog, CommandScopeError, ScanStoppedError, DEFAULT_DEADLINE_MS } from "./commands.mjs";
 import { createDiagnosticLimiter, DiagnosticError, MAX_DIAGNOSTIC_BYTES, parseDiagnostic } from "./diagnostics.mjs";
@@ -756,15 +756,25 @@ const server = createServer(async (req, res) => {
       const subscription = clear || payload.pushSubscription == null ? null : parsePushSubscription(payload.pushSubscription);
       // Clearing always works; saving a new subscription on a bridge that
       // cannot send would only let the browser believe it is subscribed.
+      // How much text this device's notifications may show. Sent with a
+      // subscription, or alone to change it; a subscription sent without it
+      // keeps the level the device already had.
+      const privacy = payload.pushPrivacy === undefined ? undefined : parsePushPrivacy(payload.pushPrivacy);
       if (subscription && !PUSH.available) throw new PushError(503, "push_unavailable", PUSH.reason);
       await pushStore.update((list) => {
         const device = store.list().find((candidate) => candidate.id === ctx.deviceId);
         if (!device) throw new DeviceError(404, "device_unknown", "No device has that identifier.");
         if (!device.active)
           throw new DeviceError(403, device.revokedAt !== null ? "device_revoked" : "device_expired", "Pair it again to reconnect.");
+        const saved = list[ctx.deviceId];
         if (clear) delete list[ctx.deviceId];
-        else if (subscription) list[ctx.deviceId] = subscription;
-        else return undefined;
+        else if (subscription) {
+          const level = privacy ?? (saved ? pushPrivacyOf(saved) : undefined);
+          list[ctx.deviceId] = level === undefined ? subscription : { ...subscription, privacy: level };
+        } else if (privacy !== undefined) {
+          if (!saved) throw new PushError(409, "push_not_subscribed", "This device has no notification subscription to change.");
+          list[ctx.deviceId] = { ...saved, privacy };
+        } else return undefined;
         return list;
       });
       json(res, 200, { ok: true });
