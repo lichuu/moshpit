@@ -172,11 +172,13 @@ const TERM: { id: TermSize; label: string }[] = [
   { id: "lg", label: "L" },
 ];
 
+// The alert payload carries no prompt text today, so the bridge's middle
+// level ("name") would show the same notification as "full" and is not offered.
 const NOTIFY_TEXT: { id: PushPrivacy; label: string; help: string }[] = [
-  { id: "full", label: "Full", help: "A lock screen shows the agent’s name and what it needs." },
-  { id: "name", label: "Agent name only", help: "A lock screen shows the agent’s name, not what it needs." },
-  { id: "generic", label: "Generic", help: "A lock screen shows only “An agent is blocked.”" },
+  { id: "full", label: "Agent name", help: "A lock screen shows the agent’s name." },
+  { id: "generic", label: "Generic", help: "A lock screen shows only that an agent is blocked or finished." },
 ];
+const shownNotifyText = (level: PushPrivacy): PushPrivacy => (level === "generic" ? "generic" : "full");
 
 type BarcodeDetectorLike = {
   new (options?: { formats?: string[] }): {
@@ -1136,16 +1138,16 @@ export function Hosts() {
                 <button
                   key={option.id}
                   type="button"
-                  aria-pressed={settings.notifyText === option.id}
+                  aria-pressed={shownNotifyText(settings.notifyText) === option.id}
                   disabled={notifyTextBusy}
                   onClick={() => {
-                    if (settings.notifyText === option.id) return;
+                    if (shownNotifyText(settings.notifyText) === option.id) return;
                     setNotifyTextBusy(true);
                     void setNotifyText(option.id).finally(() => setNotifyTextBusy(false));
                   }}
                   className={cn(
                     "min-h-9 flex-1 rounded-sm px-2 py-1 text-xs font-medium",
-                    settings.notifyText === option.id
+                    shownNotifyText(settings.notifyText) === option.id
                       ? "bg-accent text-accent-fg"
                       : "bg-surface-2 text-muted shadow-border",
                   )}
@@ -1155,7 +1157,7 @@ export function Hosts() {
               ))}
             </div>
             <p className="text-2xs text-subtle">
-              {NOTIFY_TEXT.find((option) => option.id === settings.notifyText)?.help}
+              {NOTIFY_TEXT.find((option) => option.id === shownNotifyText(settings.notifyText))?.help}
             </p>
           </div>
         ) : null}

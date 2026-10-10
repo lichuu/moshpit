@@ -58,26 +58,21 @@ async function connected(page: Page, bridge: (options?: { herdr?: string }) => P
 const group = (page: Page) => page.getByRole("group", { name: "Notification text" });
 const option = (page: Page, name: string) => group(page).getByRole("button", { name, exact: true });
 
-test("the choice appears with notifications, defaults to full, and the host keeps each change", async ({ page, bridge }) => {
+test("the choice appears with notifications, defaults to the agent name, and the host keeps each change", async ({ page, bridge }) => {
   const host = await connected(page, bridge);
   await expect(group(page), "nothing to choose while notifications are off").toHaveCount(0);
 
   await page.getByRole("checkbox", { name: "Notify when an agent blocks" }).check();
   await expect(group(page)).toBeVisible();
-  await expect(option(page, "Full")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("A lock screen shows the agent’s name and what it needs.")).toBeVisible();
+  await expect(option(page, "Agent name")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("A lock screen shows the agent’s name.")).toBeVisible();
   await expect.poll(async () => (await stored(host))?.endpoint).toBe("https://fcm.googleapis.com/fcm/send/fixture-device");
   expect((await stored(host))?.privacy, "a new subscription is full by default").toBe("full");
 
-  await option(page, "Agent name only").click();
-  await expect(option(page, "Agent name only")).toHaveAttribute("aria-pressed", "true");
-  await expect(option(page, "Full")).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByText("A lock screen shows the agent’s name, not what it needs.")).toBeVisible();
-  expect((await stored(host))?.privacy).toBe("name");
-
   await option(page, "Generic").click();
   await expect(option(page, "Generic")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("A lock screen shows only “An agent is blocked.”")).toBeVisible();
+  await expect(option(page, "Agent name")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByText("A lock screen shows only that an agent is blocked or finished.")).toBeVisible();
   expect((await stored(host))?.privacy).toBe("generic");
 
   // The choice survives a reload, and reconnecting does not reset it to full.
@@ -93,8 +88,7 @@ test("the choice appears with notifications, defaults to full, and the host keep
 test("a change the host refuses says so and keeps the previous choice", async ({ page, bridge }) => {
   const host = await connected(page, bridge);
   await page.getByRole("checkbox", { name: "Notify when an agent blocks" }).check();
-  await option(page, "Agent name only").click();
-  await expect(option(page, "Agent name only")).toHaveAttribute("aria-pressed", "true");
+  await expect(option(page, "Agent name")).toHaveAttribute("aria-pressed", "true");
 
   await page.route(`${host.url}/api/push-subscription`, (route) =>
     route.fulfill({
@@ -105,8 +99,8 @@ test("a change the host refuses says so and keeps the previous choice", async ({
   );
   await option(page, "Generic").click();
   await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Notification text not changed" })).toBeVisible();
-  await expect(option(page, "Agent name only")).toHaveAttribute("aria-pressed", "true");
+  await expect(option(page, "Agent name")).toHaveAttribute("aria-pressed", "true");
   await expect(option(page, "Generic")).toHaveAttribute("aria-pressed", "false");
   await expect(option(page, "Generic")).toBeEnabled();
-  expect((await stored(host))?.privacy, "the host still holds the previous choice").toBe("name");
+  expect((await stored(host))?.privacy, "the host still holds the previous choice").toBe("full");
 });
