@@ -94,9 +94,27 @@ test.describe("composer", () => {
     });
   }
 
+  test("a file that is not an image asks first, then adds a quoted fixture path with no request", async ({ demo }) => {
+    const calls: string[] = [];
+    demo.on("request", (request) => { if (request.url().includes("/api/")) calls.push(request.url()); });
+    const prompt = demo.getByPlaceholder("Message this agent…");
+    await prompt.fill("see ");
+    await demo.locator('input[type="file"]').setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+
+    const ask = demo.getByRole("dialog", { name: "Copy this file to the host?" });
+    await expect(ask).toContainText("notes.txt");
+    await expect(ask).toContainText("stay there after this session");
+    await ask.getByRole("button", { name: "Upload" }).click();
+    await expect(ask).toBeHidden();
+    await expect(prompt).toHaveValue("see '/srv/moshpit/files/3f9a1c/notes.txt'");
+    await expect(demo.locator(".composer-file-note")).toContainText("/srv/moshpit/files/3f9a1c/notes.txt");
+    await expect(demo.getByRole("button", { name: "Remove image" })).toHaveCount(0);
+    expect(calls).toEqual([]);
+  });
+
   test("attaches an image, clears it, and sends it as a line", async ({ demo }) => {
-    const file = demo.locator('input[type="file"][accept="image/*"]');
-    await expect(file).toHaveAttribute("accept", "image/*");
+    const file = demo.locator('input[type="file"]');
+    await expect(file).not.toHaveAttribute("accept");
 
     await file.setInputFiles(FIXTURE);
     await expect(demo.getByText("tiny.png")).toBeVisible();
@@ -169,7 +187,7 @@ test.describe("quick replies", () => {
     await demo.getByRole("button", { name: "tailscale-docs" }).click();
     const prompt = demo.getByPlaceholder("Message this agent…");
     await prompt.fill("keep this draft");
-    await demo.locator('input[type="file"][accept="image/*"]').setInputFiles(FIXTURE);
+    await demo.locator('input[type="file"]').setInputFiles(FIXTURE);
     await expect(demo.getByText("tiny.png")).toBeVisible();
 
     const dock = await openQuickReplies(demo);

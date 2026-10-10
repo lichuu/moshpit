@@ -178,13 +178,24 @@ test.describe("compact terminal composer", () => {
     const bare = await width();
     // A portrait phone stacks the actions under the input, as Chat does.
     expect(bare).toBeGreaterThan(300);
-    await demo.locator('input[type="file"][accept="image/*"]').setInputFiles({
+    await demo.locator('input[type="file"]').setInputFiles({
       name: "Screenshot 2026-01-01 at 10.00.00.png",
       mimeType: "image/png",
       buffer: readFileSync(new URL("../fixtures/tiny.png", import.meta.url)),
     });
     await expect(demo.getByRole("button", { name: "Remove image" })).toBeVisible();
     expect(await width()).toBe(bare);
+  });
+
+  test("a file that is not an image takes the same question and path in the terminal composer", async ({ demo }) => {
+    await openTerminal(demo);
+    const input = demo.getByRole("textbox", { name: "Terminal input" });
+    await demo.locator('input[type="file"]').setInputFiles({ name: "my log.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+    const ask = demo.getByRole("dialog", { name: "Copy this file to the host?" });
+    await ask.getByRole("button", { name: "Upload" }).click();
+    await expect(ask).toBeHidden();
+    await expect(input).toHaveValue("'/srv/moshpit/files/3f9a1c/my log.txt'");
+    await expect(demo.getByRole("button", { name: "Remove image" })).toHaveCount(0);
   });
 
   test("a long draft grows past two lines while the pane and Send stay on screen", async ({ demo }) => {

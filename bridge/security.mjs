@@ -15,6 +15,10 @@ const REQUEST_HEADERS = new Set(["content-type", "authorization", "x-moshpit-dev
 const PREFLIGHT_METHODS = new Set(["GET", "POST"]);
 const DEV_ORIGIN_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const JSON_BODY = /^application\/json[ \t]*(?:;[ \t]*charset[ \t]*=[ \t]*"?[\w-]+"?[ \t]*)?$/i;
+// The one route whose body is a file, not JSON. Like JSON it is not a type a
+// cross-site form can send, so the preflight and origin checks still apply.
+const FILE_UPLOAD_PATH = "/api/files";
+const FILE_BODY = /^application\/octet-stream[ \t]*$/i;
 const AUTHORITY =
   /^(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::(\d{1,5}))?$/;
 
@@ -200,7 +204,8 @@ export function createBrowserBoundary(env) {
     if (req.method === "POST") {
       const origin = requireOrigin(req);
       const type = rawValues(req, "content-type");
-      if (type.length !== 1 || !JSON_BODY.test(type[0].trim())) throw new RequestError(415, DENY_TYPE);
+      const accepted = pathname === FILE_UPLOAD_PATH ? FILE_BODY : JSON_BODY;
+      if (type.length !== 1 || !accepted.test(type[0].trim())) throw new RequestError(415, DENY_TYPE);
       return { pathname, headers: cors(origin), preflight: false };
     }
     throw new RequestError(405, DENY_METHOD);
