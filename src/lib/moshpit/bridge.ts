@@ -179,6 +179,37 @@ export function encodeImage(
   });
 }
 
+const StoredFileSchema = z.object({ path: z.string().min(1), name: z.string().min(1), size: z.number().int().nonnegative() });
+/** A file the bridge copied to the host: its absolute path there, the name it kept, and its size. */
+export type StoredFile = z.infer<typeof StoredFileSchema>;
+const FILE_UPLOAD_MS = 120_000;
+
+/**
+ * Copies a file to the host for `target`'s agent. The body is the file itself;
+ * the bridge stores it and answers with where. Nothing is sent to the pane.
+ * An abort or a dropped connection leaves nothing on the host.
+ */
+export async function uploadFile(url: string, target: string, file: File, signal?: AbortSignal): Promise<StoredFile> {
+  const timeout = AbortSignal.timeout(FILE_UPLOAD_MS);
+  const query = new URLSearchParams({ target, name: file.name });
+  const auth = headers(url);
+  let res: Response;
+  try {
+    res = await fetch(`${url}/api/files?${query}`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/octet-stream" },
+      redirect: "error",
+      body: file,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(timeout.aborted ? "The upload took too long. Nothing was kept on the host." : "The upload did not finish. Nothing was kept on the host.");
+  }
+  if (!res.ok) throw await accessError(res, url, "file upload", signal);
+  return await parsed(res, StoredFileSchema, "file upload");
+}
+
 // Every fetch that sends these headers also sets redirect: "error". A browser
 // keeps custom headers across a redirect, so a bridge answering 3xx would
 // otherwise hand the device secret and bearer to wherever it pointed.

@@ -227,7 +227,7 @@ test("terminal picker, paste and drop deliver private images followed by Enter",
   const text = "  inspect this\nkeep the spacing  ";
   await input.fill(text);
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "Attach image", exact: true }).click();
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
   await (await chooser).setFiles({ name: "picked.png", mimeType: "image/png", buffer: imageBytes });
   await expect(page.getByRole("img", { name: "Attachment preview: picked.png", exact: true })).toBeVisible();
   const screenshot = testInfo.outputPath("terminal-image-preview.png");
@@ -254,7 +254,7 @@ test("terminal picker, paste and drop deliver private images followed by Enter",
       element.dispatchEvent(new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true }));
     }, imageBytes.toString("base64"));
     await expect(page.getByRole("img", { name: `Attachment preview: ${action}.png`, exact: true })).toBeVisible();
-    await expect(page.getByText("Drop an image here", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Drop a file here", { exact: true })).toHaveCount(0);
     if (action === "drop") {
       await page.getByRole("button", { name: "Remove image", exact: true }).click();
       await expect(page.getByRole("img", { name: "Attachment preview: drop.png", exact: true })).toHaveCount(0);

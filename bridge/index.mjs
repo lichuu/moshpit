@@ -17,6 +17,7 @@ import { createHerdr, herdrInput, isHerdrKind } from "./herdr.mjs";
 import { listAgentCommands, scopedCatalog, CommandScopeError, ScanStoppedError, DEFAULT_DEADLINE_MS } from "./commands.mjs";
 import { createDiagnosticLimiter, DiagnosticError, MAX_DIAGNOSTIC_BYTES, parseDiagnostic } from "./diagnostics.mjs";
 import { createUploads, MAX_PROMPT_BODY, RequestError, readUploadedImage } from "./upload.mjs";
+import { createFileLimiter, createFiles, fileTarget, parseFileRequest } from "./files.mjs";
 import { safeJoin } from "./paths.mjs";
 import { ChangesError, changesDirectory, createChanges, parseChangesQuery } from "./changes.mjs";
 import { createSessionReader } from "./sessions.mjs";
@@ -112,6 +113,8 @@ const herdr = createHerdr({
   },
 });
 const uploads = await createUploads({ stateDir: STATE_DIR });
+const files = await createFiles({ stateDir: STATE_DIR });
+const fileLimiter = createFileLimiter();
 const diagnosticLimiter = createDiagnosticLimiter();
 const sessionReader = createSessionReader();
 const changes = createChanges();
@@ -223,6 +226,7 @@ async function revokeDevice(deviceId) {
   tickets.dropForDevice(deviceId);
   dropSockets("deviceId", deviceId);
   diagnosticLimiter.forget(deviceId);
+  fileLimiter.forget(deviceId);
   // Revocation is already committed; a failed cleanup here is retried by the
   // startup reconciliation, and delivery rechecks the device before sending.
   await pushStore.remove(deviceId).catch(() => console.error("push cleanup after revocation failed"));
@@ -681,6 +685,23 @@ const server = createServer(async (req, res) => {
         "content-length": bytes.length,
       });
       res.end(bytes);
+      return;
+    }
+    // A file for the agent (C12). The body is the file's bytes, streamed to
+    // disk under a byte cap; nothing is sent to the pane, and there is no
+    // route that reads a stored file back.
+    if (req.method === "POST" && pathname === "/api/files") {
+      try {
+        fileLimiter.take(ctx.deviceId);
+        const { target, name, length } = parseFileRequest(url.searchParams, req.headers);
+        fileTarget(await herdr.snapshot(), target);
+        const saved = await files.save({ name, length, chunks: req.iterator({ destroyOnReturn: false }) });
+        await audit({ kind: "file", deviceId: ctx.deviceId, target, name: saved.name, size: saved.size });
+        json(res, 200, saved);
+      } catch (error) {
+        req.resume();
+        throw error;
+      }
       return;
     }
     if (req.method === "GET" && pathname === "/api/commands") {

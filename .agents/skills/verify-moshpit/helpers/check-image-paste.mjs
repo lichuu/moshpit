@@ -26,11 +26,11 @@ try {
   await p.getByRole("button", { name: "Open moshpit" }).click();
   await p.getByText("migrate", { exact: true }).click();
 
-  const attach = p.getByRole("button", { name: "Attach image" });
-  assert.ok(await attach.count(), "Attach image button missing");
+  const attach = p.getByRole("button", { name: "Attach file" });
+  assert.ok(await attach.count(), "Attach file button missing");
   console.log("ok   paperclip present");
 
-  const input = p.locator('input[type="file"][accept="image/*"]');
+  const input = p.locator('input[type="file"]');
   assert.equal(await input.getAttribute("accept"), "image/*", "accept is not image/*");
   await input.setInputFiles(fixture);
   await p.getByText("tiny.png").waitFor({ state: "visible" });

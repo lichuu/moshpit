@@ -6,7 +6,7 @@ import { useMoshpitStore } from "@/lib/moshpit/store";
 import { newId } from "@/lib/moshpit/events";
 import { draftSessionId, draftStore, listDrafts, useDraft } from "@/lib/moshpit/drafts";
 import type { DraftKey } from "@/lib/moshpit/drafts";
-import { bridgeUrl, encodeImage, fetchCommands } from "@/lib/moshpit/bridge";
+import { bridgeUrl, encodeImage, fetchCommands, uploadFile, type StoredFile } from "@/lib/moshpit/bridge";
 import { commandScope, detectCommandToken, insertPrefix, insertSuggestion, matchCommands, mergeCatalog, type CommandSuggestion, type DisplayCatalog, type RemoteCatalog, type TokenRange } from "@/lib/moshpit/commands";
 import { builtinCommands, collisionPolicy } from "@/lib/moshpit/builtin-commands";
 import { submitSession } from "@/lib/moshpit/session";
@@ -20,6 +20,8 @@ import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
 import { useOnline } from "@/lib/moshpit/network";
 import { validateImage } from "@/lib/moshpit/image";
+import { DEMO_FILE_DIRECTORY, formatBytes, insertQuotedPath, isImageFile, validateFile } from "@/lib/moshpit/file-upload";
+import { FileSendDialog } from "@/components/moshpit/file-send-dialog";
 import { reviewCommentLabel, withReviewComments } from "@/lib/moshpit/review-comments";
 import { ReviewCommentsChip } from "@/components/moshpit/review-comments-chip";
 
@@ -120,6 +122,14 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const [listening, setListening] = useState(false);
   const [preview, setPreview] = useState<string>();
   const [dragging, setDragging] = useState(false);
+  // A non-image file waiting on the question, where the caret was when it was
+  // picked, and the last file copied to the host (kept on screen: it outlives
+  // the session). `caretAfter` is set while focus is on its way back to the
+  // input once the dialog closes.
+  const [offer, setOffer] = useState<File | null>(null);
+  const [stored, setStored] = useState<StoredFile | null>(null);
+  const fileSel = useRef<{ start: number; end: number } | null>(null);
+  const caretAfter = useRef<number | null>(null);
   const [recovered, setRecovered] = useState<Awaited<ReturnType<typeof listDrafts>>>([]);
   // Captured when the picker opens: focusing the picker's inputs must not
   // move where the snippet lands.
@@ -137,6 +147,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const tools = useRef<HTMLDetailsElement>(null);
   const picker = useRef<HTMLDetailsElement>(null);
   const file = useRef<HTMLInputElement>(null);
+  const attach = useRef<HTMLButtonElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const recognition = useRef<Recognition | null>(null);
   const pending = useRef(false);
@@ -344,6 +355,61 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     if (error) { toast(error); return; }
     saved.update({ attachment: image });
   }
+  // An image stays an attachment, sent with the prompt. Anything else is
+  // copied to the host after a question, and only its path joins the draft.
+  function pickFile(picked?: File) {
+    if (!picked) return;
+    if (isImageFile(picked)) { pickImage(picked); return; }
+    if (draftStore(draftKey).getSnapshot().draft.submission?.state === "submitting") return;
+    const error = validateFile(picked);
+    if (error) { toast(error); return; }
+    if (!host?.demo && (!online || !ready)) {
+      toast("Reconnect to send a file", { description: "A file is copied to the host when you pick it, so this needs a connection." });
+      return;
+    }
+    const input = textarea.current;
+    const length = draftStore(draftKey).getSnapshot().draft.text.length;
+    fileSel.current = { start: input?.selectionStart ?? length, end: input?.selectionEnd ?? length };
+    setOffer(picked);
+  }
+  function copyFile(picked: File, signal: AbortSignal): Promise<StoredFile> {
+    if (host?.demo) {
+      // No request in demo mode: a fixture path after a short wait.
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve({ path: `${DEMO_FILE_DIRECTORY}/${picked.name}`, name: picked.name, size: picked.size }), 400);
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Cancelled", "AbortError")); }, { once: true });
+      });
+    }
+    if (!host || !ready) return Promise.reject(new Error("Reconnect to send a file."));
+    return uploadFile(bridgeUrl(host), agent.id, picked, signal);
+  }
+  // The path goes in at the caret, quoted, and the message is not sent. A
+  // draft too long to take it keeps its text; the path is on screen below.
+  function filePlaced(result: StoredFile) {
+    setOffer(null);
+    setStored(result);
+    const live = draftStore(draftKey).getSnapshot().draft.text;
+    const at = fileSel.current ?? { start: live.length, end: live.length };
+    fileSel.current = null;
+    const next = insertQuotedPath(live, at.start, at.end, result.path);
+    if (next.text.length > SNIPPET_LIMITS.text) {
+      toast("The path doesn't fit", { description: "The draft would pass the send limit. The path is shown below the message." });
+      return;
+    }
+    flushSync(() => saved.update({ text: next.text }));
+    caretAfter.current = next.caret;
+  }
+  // Where focus goes when the file dialog closes: the input with the caret
+  // after the path, or the button that opened it.
+  function afterFileDialog() {
+    const caretAt = caretAfter.current;
+    caretAfter.current = null;
+    const input = textarea.current;
+    if (caretAt === null || !input) return attach.current;
+    input.setSelectionRange(caretAt, caretAt);
+    setCaret(caretAt);
+    return input;
+  }
   // Insertion never sends: it edits the draft through the same revision path
   // as typing, then restores focus and the caret to the inserted token.
   // flushSync lands the controlled update before this returns, so the
@@ -471,8 +537,14 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   }
 
   return <div className={`composer-wrap bg-bg ${terminal ? "terminal-composer" : ""}`} onPaste={(event) => {
-    if (event.clipboardData.files[0]) { event.preventDefault(); pickImage(event.clipboardData.files[0]); }
-  }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); pickImage(event.dataTransfer.files[0]); }}>
+    if (event.clipboardData.files[0]) { event.preventDefault(); pickFile(event.clipboardData.files[0]); }
+  }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={(event) => {
+    event.preventDefault();
+    setDragging(false);
+    // Only the drop event can say that what was dropped is a folder.
+    if (event.dataTransfer.items?.[0]?.webkitGetAsEntry?.()?.isDirectory) { toast("Folders can't be sent", { description: "Choose a file." }); return; }
+    pickFile(event.dataTransfer.files[0]);
+  }}>
     <div className="composer-blocks min-h-0 grow overflow-y-auto">
       {/* An unresolved question card in Chat already shows the prompt and its
           way out, so the banner would only repeat it. */}
@@ -580,7 +652,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       )}
     </div>
     <div className={`composer-panel shrink-0 rounded-2xl border bg-bg p-2 focus-within:border-accent/70 ${dragging ? "border-accent ring-2 ring-accent/20" : "border-border-strong"}`}>
-      {dragging && <p className="p-2 text-sm text-accent">Drop an image here</p>}
+      {dragging && <p className="p-2 text-sm text-accent">Drop a file here</p>}
       {draft.attachment && <div className="composer-attachment mb-1 flex items-center gap-2 rounded-lg bg-surface p-2">
         {preview && <img src={preview} alt={`Attachment preview: ${draft.attachment.name}`} className="size-10 rounded object-cover" />}
         <span className="min-w-0 flex-1 truncate text-xs">{draft.attachment.name}</span>
@@ -631,8 +703,8 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         placeholder={terminal ? "Type or dictate terminal input" : "Message this agent…"}
         className="block max-h-40 min-h-10 w-full resize-none bg-transparent px-2 py-2 text-base leading-6 outline-none placeholder:text-subtle" />
       <div className="flex items-center gap-1">
-        <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { pickImage(e.target.files?.[0]); e.target.value = ""; }} />
-        <button type="button" aria-label="Attach image" disabled={busy} onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted disabled:opacity-50"><Paperclip className="size-4" /></button>
+        <input ref={file} type="file" hidden onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
+        <button ref={attach} type="button" aria-label="Attach file" disabled={busy} onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted disabled:opacity-50"><Paperclip className="size-4" /></button>
         {!terminal && buttonPrefix && <button type="button" aria-label={insertLabel} onClick={() => insertCommandPrefix()} disabled={busy} className="flex size-10 items-center justify-center rounded-lg text-muted"><Slash className="size-4" /></button>}
         <button type="button" aria-label={listening ? "Stop listening" : "Dictate"} aria-pressed={listening} onClick={dictate} disabled={busy} className={`flex size-10 items-center justify-center rounded-lg ${listening ? "text-blocked" : "text-muted"}`}><Mic className="size-4" /></button>
         <details ref={tools} className="relative">
@@ -690,5 +762,18 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       {!terminal && nativePane && !nativePane.open && draft.submission?.state === "delivered" && <button type="button" onClick={nativePane.onToggle} className="-my-2 shrink-0 py-2 font-medium text-accent">Show pane</button>}
     </div>}
     {saved.error && <p role="status" className="mt-1 shrink-0 px-2 text-xs text-muted">{saved.error}</p>}
+    {stored && <div className="composer-file-note mt-1 flex shrink-0 items-start gap-1 px-2 text-xs text-muted">
+      <p role="status" className="min-w-0 flex-1 py-2">
+        Copied {stored.name} ({formatBytes(stored.size)}) to the host. It stays there after this session: <span className="break-all font-mono">{stored.path}</span>
+      </p>
+      <button type="button" aria-label="Dismiss file note" className="-mr-1 shrink-0 p-2" onClick={() => setStored(null)}><X className="size-4" /></button>
+    </div>}
+    <FileSendDialog
+      file={offer}
+      upload={copyFile}
+      onUploaded={filePlaced}
+      onClose={() => { setOffer(null); fileSel.current = null; }}
+      restoreFocus={afterFileDialog}
+    />
   </div>;
 }
