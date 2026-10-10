@@ -19,6 +19,8 @@ import { Steer } from "@/components/moshpit/steer";
 import { Terminal, TerminalLinks } from "@/components/moshpit/terminal";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
 import { AgentIcon } from "@/components/moshpit/agent-icon";
+import { bridgeUrl } from "@/lib/moshpit/bridge";
+import { useCloseCheck } from "@/lib/moshpit/close-check";
 import { contextLevel, useAgentContext } from "@/lib/moshpit/context-meter";
 import { useMoshpitStore } from "@/lib/moshpit/store";
 import {
@@ -234,6 +236,10 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const selectedId = useMoshpitStore((state) => state.selectedAgentId);
   const selectedShellId = useMoshpitStore((state) => state.selectedShellId);
   const hostId = useMoshpitStore((state) => state.connectedHostId);
+  const host = useMoshpitStore((state) =>
+    state.hosts.find((candidate) => candidate.id === state.connectedHostId),
+  );
+  const herdrRunning = useMoshpitStore((state) => state.herdrRunning);
   const shells = useMoshpitStore((state) => state.shells);
   const shell = selectedShellId
     ? shells.find((s) => s.id === selectedShellId)
@@ -267,6 +273,15 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const changesReturn = useRef<HTMLElement | null>(null);
   const renameSettled = useRef(false);
   const closeTrigger = useRef<HTMLButtonElement | null>(null);
+
+  // C11: closing an agent first asks its checkout whether work would be left
+  // behind. A shell has no checkout of its own to ask, and a demo host has no
+  // bridge: both close as they always did.
+  const closeCheck = useCloseCheck(
+    closing !== null && !shell && Boolean(agent),
+    host && !host.demo && herdrRunning ? bridgeUrl(host) : "",
+    agent?.id ?? "",
+  );
 
   const confirmClose = (target: ActionTarget) => {
     setClosing(null);
@@ -517,8 +532,19 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
       <ConfirmClose
         open={closing !== null}
         title={`Close ${label.name}?`}
-        description="Close ends the pane and the agent running in it. The files in its checkout stay as they are."
+        description={
+          closeCheck.phase === "work" || closeCheck.phase === "unknown"
+            ? "Close ends the pane and the agent running in it. It does not delete or change any files in the checkout."
+            : "Close ends the pane and the agent running in it. The files in its checkout stay as they are."
+        }
         confirmLabel="Close pane"
+        check={closeCheck}
+        onViewChanges={() => {
+          // Two modal layers would fight over focus: look first, then close.
+          changesReturn.current = closeTrigger.current;
+          setClosing(null);
+          setViewingChanges(target);
+        }}
         onCancel={() => setClosing(null)}
         onConfirm={() => closing && confirmClose(closing)}
         restoreFocus={() => closeTrigger.current}

@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { chmod, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   ChangesError,
@@ -16,47 +14,13 @@ import {
   parseChangesQuery,
   resolveInside,
 } from "./changes.mjs";
+import { cleanup, git, repo, scratch, snapshotGitDir, trap } from "./git-fixtures.mjs";
 
-const IDENT = ["-c", "user.name=t", "-c", "user.email=t@e"];
-const git = (cwd, ...args) => execFileSync("git", [...IDENT, ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } });
 const changes = createChanges();
-const cleanups = [];
-test.after(async () => {
-  await Promise.all(cleanups.map((dir) => rm(dir, { recursive: true, force: true })));
-});
-
-async function scratch() {
-  const dir = await mkdtemp(path.join(tmpdir(), "moshpit-changes-"));
-  cleanups.push(dir);
-  return dir;
-}
-
-/** A repository with one commit holding `files` (path -> text). */
-async function repo(files = { "a.txt": "one\ntwo\nthree\n" }, { name = "work" } = {}) {
-  const dir = path.join(await scratch(), name);
-  await mkdir(dir);
-  git(dir, "init", "-q", "-b", "main");
-  for (const [file, text] of Object.entries(files)) {
-    await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
-    await writeFile(path.join(dir, file), text);
-  }
-  git(dir, "add", "-A");
-  git(dir, "commit", "-q", "-m", "first");
-  return dir;
-}
+test.after(cleanup);
 
 const entry = (result, name) => result.files.find((file) => file.path === name);
 const patchOf = (result, file) => result.patch.slice(...file.patch);
-
-/** A script that stands in for a program git must never run: it leaves a marker. */
-async function trap(name) {
-  const home = await scratch();
-  const marker = path.join(home, `${name}.ran`);
-  const script = path.join(home, `${name}.sh`);
-  await writeFile(script, `#!/bin/sh\necho ran >> '${marker}'\ncat\n`);
-  await chmod(script, 0o755);
-  return { script, marker, ran: () => existsSync(marker) };
-}
 
 test("lists staged and unstaged edits against HEAD, with counts and the branch", async () => {
   const dir = await repo({ "a.txt": "one\ntwo\nthree\n", "b.txt": "x\n", "c.txt": "keep\n" });
@@ -389,19 +353,6 @@ test("GIT_ variables in the bridge's own environment do not steer git", async ()
     }
   }
 });
-
-async function snapshotGitDir(dir) {
-  const rows = [];
-  async function walk(current) {
-    for (const item of (await readdir(current, { withFileTypes: true })).sort((x, y) => x.name.localeCompare(y.name))) {
-      const full = path.join(current, item.name);
-      if (item.isDirectory()) await walk(full);
-      else rows.push(`${path.relative(dir, full)} ${(await stat(full)).mtimeMs} ${createHash("sha1").update(await readFile(full)).digest("hex")}`);
-    }
-  }
-  await walk(path.join(dir, ".git"));
-  return rows;
-}
 
 test("a read changes nothing: no lock, no index refresh, no staging, no new objects", async () => {
   const dir = await repo({ "a.txt": "1\n", "b.txt": "1\n" });
