@@ -65,7 +65,7 @@ export function changesDirectory(snapshot, target) {
 
 // Nothing from the user's own environment may steer git: GIT_DIR, an external
 // diff program, a pager and the like all come in through GIT_* variables.
-function gitEnvironment(extra) {
+export function gitEnvironment(extra) {
   const env = {};
   for (const [name, value] of Object.entries(process.env)) {
     if (value !== undefined && !name.startsWith("GIT_")) env[name] = value;
@@ -102,7 +102,7 @@ const SAFE_CONFIG = [
 // prefixes and context so a user's diff settings cannot change what we parse.
 const DIFF_FLAGS = ["--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", "-U3"];
 
-function runGit(bin, args, { cwd, env, signal, maxBuffer, timeout, okCodes = [0] }) {
+export function runGit(bin, args, { cwd, env, signal, maxBuffer, timeout, okCodes = [0] }) {
   return new Promise((resolve, reject) => {
     execFile(
       bin,

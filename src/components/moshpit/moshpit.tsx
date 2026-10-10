@@ -13,6 +13,8 @@ import type { Agent, FilterId } from "@/lib/moshpit/types";
 import { cn, formatAgo } from "@/lib/utils";
 import { StatusPill } from "@/components/moshpit/status-pill";
 import { ContextBadge } from "@/components/moshpit/context-meter";
+import { CardPullRequest, HeaderPullRequest, PullRequestSlot } from "@/components/moshpit/pull-request-pill";
+import { pullRequestOf, sharedPullRequest } from "@/lib/moshpit/pull-request";
 import { contextLevel, useAgentContext } from "@/lib/moshpit/context-meter";
 import { Button } from "@/components/ui/button";
 import { paneLabel, projectOf } from "@/lib/moshpit/label";
@@ -35,64 +37,69 @@ function AgentCard({ agent, all }: { agent: Agent; all: Agent[] }) {
   // figure; and only past the amber line, since this is a triage signal.
   const context = useAgentContext(agent.id);
   const pressing = context && ["warn", "high"].includes(contextLevel(context)) ? context : undefined;
+  const pullRequest = pullRequestOf(agent);
   return (
-    <button
-      type="button"
-      onClick={() => select(agent.id)}
-      aria-pressed={layout.regime === "wide" ? selected : undefined}
-      className={cn(
-        "agent-card w-full rounded-xl border border-transparent p-4 text-left",
-        blocked && "border-l-blocked",
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="truncate font-medium tracking-tight">
-              {paneLabel(agent, all).name}
-            </p>
-            {agent.attention ? (
-              <span className="size-1.5 shrink-0 rounded-full bg-blocked" />
-            ) : null}
-          </div>
-          <p className="mt-0.5 truncate text-xs text-muted">
-            {agent.workspace} <span className="text-subtle">/ {agent.tab}</span>
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <StatusPill status={agent.status} />
-          <span className="text-2xs tabular-nums text-subtle">
-            {formatAgo(agent.statusChangedAt)}
-          </span>
-        </div>
-      </div>
-      {agent.lastOutput.trim() && agent.lastOutput.trim() !== (agent.title?.trim() || agent.name) && <p
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => select(agent.id)}
+        aria-pressed={layout.regime === "wide" ? selected : undefined}
         className={cn(
-          "mt-3 line-clamp-2 text-[13px] leading-5",
-          blocked ? "text-blocked" : "text-fg/80",
+          "agent-card w-full rounded-xl border border-transparent p-4 text-left",
+          blocked && "border-l-blocked",
         )}
       >
-        {agent.lastOutput}
-      </p>}
-      <div className="mt-3 flex items-center gap-1.5 text-2xs text-subtle">
-        <AgentIcon kind={agent.kind} />
-        {agent.kind}
-        {agent.model ? (
-          <>
-            <span className="mx-1 text-border-strong">/</span>
-            <span className="truncate">{agent.model}</span>
-          </>
-        ) : null}
-        {agent.branch ? (
-          <>
-            <span className="mx-1 text-border-strong">/</span>
-            <GitBranch className="size-3" />
-            <span className="truncate">{agent.branch}</span>
-          </>
-        ) : null}
-        {pressing ? <ContextBadge context={pressing} className="ml-auto" /> : null}
-      </div>
-    </button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="truncate font-medium tracking-tight">
+                {paneLabel(agent, all).name}
+              </p>
+              {agent.attention ? (
+                <span className="size-1.5 shrink-0 rounded-full bg-blocked" />
+              ) : null}
+            </div>
+            <p className="mt-0.5 truncate text-xs text-muted">
+              {agent.workspace} <span className="text-subtle">/ {agent.tab}</span>
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <StatusPill status={agent.status} />
+            <span className="text-2xs tabular-nums text-subtle">
+              {formatAgo(agent.statusChangedAt)}
+            </span>
+          </div>
+        </div>
+        {agent.lastOutput.trim() && agent.lastOutput.trim() !== (agent.title?.trim() || agent.name) && <p
+          className={cn(
+            "mt-3 line-clamp-2 text-[13px] leading-5",
+            blocked ? "text-blocked" : "text-fg/80",
+          )}
+        >
+          {agent.lastOutput}
+        </p>}
+        <div className="mt-3 flex items-center gap-1.5 text-2xs text-subtle">
+          <AgentIcon kind={agent.kind} />
+          <span className="shrink-0 whitespace-nowrap">{agent.kind}</span>
+          {agent.model ? (
+            <>
+              <span className="mx-1 text-border-strong">/</span>
+              <span className="truncate">{agent.model}</span>
+            </>
+          ) : null}
+          {agent.branch ? (
+            <>
+              <span className="mx-1 text-border-strong">/</span>
+              <GitBranch className="size-3 shrink-0" />
+              <span className="min-w-0 truncate">{agent.branch}</span>
+            </>
+          ) : null}
+          {pressing ? <ContextBadge context={pressing} className="ml-auto" /> : null}
+          {pullRequest ? <PullRequestSlot pr={pullRequest} className={cn("shrink-0", !pressing && "ml-auto")} /> : null}
+        </div>
+      </button>
+      {pullRequest ? <CardPullRequest pr={pullRequest} /> : null}
+    </div>
   );
 }
 
@@ -372,11 +379,12 @@ function ProjectSection({ project, all, filter }: { project: ProjectGroup; all: 
   const toggle = useMoshpitStore((state) => state.toggleProject);
   const [adding, setAdding] = useState(false);
   const visible = sortedAgents(project.agents, filter);
+  const pullRequest = sharedPullRequest(project.agents);
   const expanded = filter !== "all" || !collapsed;
   if (visible.length === 0) return null;
   return (
     <section className="project-group mb-4 min-w-0">
-      <div className="flex items-center gap-1">
+      <div className="@container flex items-center gap-1">
         <button
           type="button"
           aria-label={`Project ${project.name}`}
@@ -396,6 +404,7 @@ function ProjectSection({ project, all, filter }: { project: ProjectGroup; all: 
           {project.attention > 0 && <span className="shrink-0 rounded-md bg-blocked/10 px-1.5 py-1 text-2xs text-blocked" aria-label={`${project.attention} need attention`}>{project.attention} waiting</span>}
           <span className="text-2xs tabular-nums text-muted">{filter === "all" ? project.agents.length : `${visible.length}/${project.agents.length}`}</span>
         </button>
+        {pullRequest ? <HeaderPullRequest pr={pullRequest} /> : null}
         <button
           type="button"
           aria-label={`New agent in ${project.name}`}

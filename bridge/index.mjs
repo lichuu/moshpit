@@ -20,6 +20,7 @@ import { createUploads, MAX_PROMPT_BODY, RequestError, readUploadedImage } from 
 import { createFileLimiter, createFiles, fileTarget, parseFileRequest } from "./files.mjs";
 import { safeJoin } from "./paths.mjs";
 import { ChangesError, changesDirectory, createChanges, parseChangesQuery } from "./changes.mjs";
+import { createPullRequests } from "./pull-requests.mjs";
 import { createSessionReader } from "./sessions.mjs";
 import { createSubmissions } from "./submissions.mjs";
 import { createBrowserBoundary, createIdentitySecurity, isApiPath } from "./security.mjs";
@@ -118,6 +119,9 @@ const fileLimiter = createFileLimiter();
 const diagnosticLimiter = createDiagnosticLimiter();
 const sessionReader = createSessionReader();
 const changes = createChanges();
+const pullRequests = createPullRequests();
+// A running `gh` or read must not outlive the bridge.
+process.on("exit", () => pullRequests.close());
 const submissions = createSubmissions({
   stateDir: STATE_DIR,
   herdr,
@@ -621,7 +625,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/snapshot") {
       const snapshot = await herdr.snapshot();
       const agents = await Promise.all(snapshot.agents.map(async (agent) => ({ ...agent, lastMessageAt: await sessionReader.lastMessageAt(agent) })));
-      json(res, 200, { ...snapshot, agents });
+      // C9: whatever pull-request status is cached, added without waiting. This
+      // read is also what tells the worker that someone is looking.
+      json(res, 200, { ...snapshot, agents: pullRequests.annotate(agents) });
       return;
     }
     if (req.method === "GET" && pathname === "/api/agent-detail") {
