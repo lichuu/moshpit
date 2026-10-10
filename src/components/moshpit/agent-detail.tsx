@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   Ellipsis,
+  FileDiff,
   Link,
   LoaderCircle,
   MessageSquareText,
@@ -10,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useId, useRef, useState } from "react";
+import { ChangesSheet } from "@/components/moshpit/changes-sheet";
 import { ConfirmClose } from "@/components/moshpit/confirm-close";
 import { ContextBadge } from "@/components/moshpit/context-meter";
 import { StatusPill } from "@/components/moshpit/status-pill";
@@ -125,7 +127,8 @@ function ShellButton({
 
 /**
  * Everything that is not a daily action: the full title and pane ID (selectable,
- * since the header truncates the name), Rename and Close. A disclosure of
+ * since the header truncates the name), Changes (on a phone, where the header
+ * has no room for another button), Rename and Close. A disclosure of
  * ordinary buttons, not an ARIA menu, so it needs no arrow-key handling: Tab
  * walks it, Escape closes it and returns focus to its button.
  */
@@ -134,6 +137,7 @@ function AgentActions({
   paneId,
   closing,
   closeRef,
+  onChanges,
   onRename,
   onClose,
 }: {
@@ -142,6 +146,8 @@ function AgentActions({
   /** The close dialog is up; the panel must stay mounted for focus to return. */
   closing: boolean;
   closeRef: React.RefObject<HTMLButtonElement | null>;
+  /** Receives the control to refocus when the sheet closes. */
+  onChanges: (returnTo: HTMLElement | null) => void;
   onRename: () => void;
   onClose: () => void;
 }) {
@@ -184,6 +190,17 @@ function AgentActions({
             </p>
           </div>
           <div className="mx-1 mb-1 h-px bg-border" />
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onChanges(toggle.current);
+            }}
+            className={cn(item, "lg:hidden")}
+          >
+            <FileDiff className="size-4 text-muted" />
+            Changes
+          </button>
           <button
             type="button"
             aria-label="Rename agent"
@@ -246,6 +263,8 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const [renaming, setRenaming] = useBoundAction<ActionTarget & { draft: string }>(shown);
   const [closing, setClosing] = useBoundAction<ActionTarget>(shown);
   const [shellAttempt, setShellAttempt] = useBoundAction<ShellAttempt>(shown);
+  const [viewingChanges, setViewingChanges] = useBoundAction<ActionTarget>(shown);
+  const changesReturn = useRef<HTMLElement | null>(null);
   const renameSettled = useRef(false);
   const closeTrigger = useRef<HTMLButtonElement | null>(null);
 
@@ -421,6 +440,19 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
               live mid-rename. */}
           {renaming ? null : (
             <>
+              <button
+                type="button"
+                aria-label="Changes"
+                title="What this agent has changed in its checkout"
+                onClick={(event) => {
+                  changesReturn.current = event.currentTarget;
+                  setViewingChanges(target);
+                }}
+                className={cn(headerButton, "gap-1.5 px-3 text-sm font-medium max-lg:hidden")}
+              >
+                <FileDiff className="size-4" />
+                Changes
+              </button>
               <ShellButton
                 phase={shellAttempt?.phase ?? null}
                 onClick={openShellHere}
@@ -431,6 +463,10 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
                 paneId={agent.paneId}
                 closing={closing !== null}
                 closeRef={closeTrigger}
+                onChanges={(returnTo) => {
+                  changesReturn.current = returnTo;
+                  setViewingChanges(target);
+                }}
                 onRename={openRename}
                 onClose={() => setClosing(target)}
               />
@@ -472,6 +508,12 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
         <Steer view={detailView} />
       )}
 
+      <ChangesSheet
+        open={viewingChanges !== null}
+        agent={agent}
+        onClose={() => setViewingChanges(null)}
+        restoreFocus={() => changesReturn.current}
+      />
       <ConfirmClose
         open={closing !== null}
         title={`Close ${label.name}?`}
