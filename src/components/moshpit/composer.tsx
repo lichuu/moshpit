@@ -20,6 +20,8 @@ import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
 import { useOnline } from "@/lib/moshpit/network";
 import { validateImage } from "@/lib/moshpit/image";
+import { reviewCommentLabel, withReviewComments } from "@/lib/moshpit/review-comments";
+import { ReviewCommentsChip } from "@/components/moshpit/review-comments-chip";
 
 type Recognition = {
   lang: string; interimResults: boolean; continuous: boolean;
@@ -43,7 +45,13 @@ type Props = {
   onDelivered?: (requestId: string) => void;
   /** Chat only: context use of the session's latest model call, when the bridge reports it. */
   context?: ContextUsage;
+  /** Opens the Changes sheet, where review comments are written. `returnTo` takes focus back when it closes. */
+  onOpenChanges?: (returnTo: HTMLElement | null) => void;
 };
+
+// A message that opens with a command is the command's, so staged comments
+// would become its arguments instead of reaching the agent.
+const commandLike = (text: string) => /^\s*[/$][\w:.-]*(\s|$)/.test(text);
 
 /**
  * Quick replies as one key-bar button, beside the display options. A
@@ -91,7 +99,7 @@ export const Composer = memo(function Composer(props: Props) {
   return <SessionComposer key={JSON.stringify(key)} {...props} draftKey={key} />;
 });
 
-function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot, nativePane, onDelivered, context }: Props & { draftKey: DraftKey }) {
+function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities, mode = "chat", liveQuestion, quickRepliesSlot, nativePane, onDelivered, context, onOpenChanges }: Props & { draftKey: DraftKey }) {
   const saved = useDraft(draftKey);
   const { draft } = saved;
   const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
@@ -284,22 +292,34 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
     // a command's arguments is the command's business, while a stray leading
     // or trailing line break would submit early or twice.
     const text = textOverride ?? (terminal ? draft.text : draft.text.replace(/^[\r\n]+|[\r\n]+$/g, ""));
-    if (action !== "terminal" && action !== "stop" && !text.trim() && !draft.attachment) return;
+    // Review comments ride with the draft's own send, never a quick reply or a stop.
+    const comments = quickReply || action === "stop" ? [] : draft.comments;
+    if (action !== "terminal" && action !== "stop" && !text.trim() && !draft.attachment && !comments.length) return;
+    if (comments.length && commandLike(text)) {
+      toast("A command can't carry review comments", { description: "Send the command on its own first, or clear the comments." });
+      return;
+    }
+    // What the agent receives: the typed text, then the comments as one block.
+    const outgoing = withReviewComments(text, comments);
+    if (outgoing.length > SNIPPET_LIMITS.text) {
+      toast("Too long to send", { description: "The review comments would push the message past the send limit. Shorten the message or remove some comments." });
+      return;
+    }
     pending.current = true;
     const rec = recognition.current; recognition.current = null; rec?.stop(); setListening(false);
     const id = newId();
     const revision = draft.revision;
     const attachment = quickReply ? undefined : draft.attachment ?? undefined;
-    if (!quickReply) await saved.markSubmitting(id);
+    if (!quickReply) await saved.markSubmitting(id, comments);
     let receipt: Receipt;
     try {
       if (host?.demo) {
-        const success = action === "stop" ? (sendKeys(agent.id, "esc"), true) : await prompt(agent.id, text, attachment);
+        const success = action === "stop" ? (sendKeys(agent.id, "esc"), true) : await prompt(agent.id, outgoing, attachment);
         if (success && action === "terminal") sendKeys(agent.id, "enter");
         receipt = { id, state: success ? "delivered" : "failed", message: success ? "Sent" : "Not sent. Your draft is saved." };
       } else if (host && ready) {
         receipt = await submitSession(bridgeUrl(host), {
-          id, target: agent.id, sessionId: draftKey[1], mode: action, text: action === "stop" ? "" : text,
+          id, target: agent.id, sessionId: draftKey[1], mode: action, text: action === "stop" ? "" : outgoing,
           attachment: action !== "stop" && attachment ? await encodeImage(attachment) : undefined,
         });
       } else receipt = { id, state: "failed", message: "Reconnect to send. Your draft is saved." };
@@ -566,6 +586,13 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         <span className="min-w-0 flex-1 truncate text-xs">{draft.attachment.name}</span>
         <button type="button" aria-label="Remove image" className="p-2" onClick={() => saved.update({ attachment: null })}><X className="size-4" /></button>
       </div>}
+      {draft.comments.length > 0 && <ReviewCommentsChip
+        comments={draft.comments}
+        locked={busy}
+        onRemove={(id) => saved.editComments((now) => now.filter((comment) => comment.id !== id))}
+        onClear={() => saved.editComments(() => [])}
+        onOpenChanges={onOpenChanges}
+      />}
       <textarea ref={textarea} rows={1} aria-label={terminal ? "Terminal input" : "Message agent"}
         aria-autocomplete={listVisible ? "list" : undefined} aria-controls={listVisible ? listId : undefined}
         aria-activedescendant={listVisible && selected ? `${listId}-${selectedIndex}` : undefined}
@@ -618,7 +645,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
             <div className="flex flex-wrap gap-1">{["esc", "tab", "shift+tab", "enter", "ctrl+c", "up", "down"].map((key) => <button type="button" key={key} disabled={unavailable} onClick={() => sendKeys(agent.id, key)} className="rounded bg-surface px-3 py-2 font-mono text-xs">{key}</button>)}</div>
             <button type="button" onClick={() => { saved.discard(); }} className="mt-2 block py-2 text-sm text-muted">Discard draft</button>
             <button type="button" onClick={() => void listDrafts().then(setRecovered)} className="block py-2 text-sm text-muted">Recover saved drafts</button>
-            {recovered.filter((item) => JSON.stringify(item.key) !== JSON.stringify(draftKey)).map((item) => <button key={JSON.stringify(item.key)} type="button" disabled={Boolean(draft.text || draft.attachment)} title="Empty or discard the current draft before restoring another" onClick={() => { saved.update({ text: item.draft.text, attachment: item.draft.attachment }); setRecovered([]); }} className="block w-full truncate rounded py-2 text-left text-xs disabled:opacity-50">{item.key[0]} · {item.draft.text.slice(0, 70) || item.draft.attachment?.name}</button>)}
+            {recovered.filter((item) => JSON.stringify(item.key) !== JSON.stringify(draftKey)).map((item) => <button key={JSON.stringify(item.key)} type="button" disabled={Boolean(draft.text || draft.attachment || draft.comments.length)} title="Empty or discard the current draft before restoring another" onClick={() => { saved.update({ text: item.draft.text, attachment: item.draft.attachment, comments: item.draft.comments }); setRecovered([]); }} className="block w-full truncate rounded py-2 text-left text-xs disabled:opacity-50">{item.key[0]} · {item.draft.text.slice(0, 70) || item.draft.attachment?.name || reviewCommentLabel(item.draft.comments.length)}</button>)}
           </div>
         </details>
         <details ref={picker} className="relative" onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) snippetSel.current = null; }}>

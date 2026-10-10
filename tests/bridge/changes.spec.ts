@@ -134,7 +134,7 @@ test.describe("Changes sheet", () => {
     await expect(diff).toBeVisible();
     await expect(diff.getByText(/^@@ -1,3 \+1,4 @@/)).toBeVisible();
     // Added and removed lines carry a +/- sign as text, not only a colour.
-    const gutter = await diff.locator("div.flex").evaluateAll((lines) => lines.map((line) => line.children[1]?.textContent ?? ""));
+    const gutter = await diff.locator("[data-line]").evaluateAll((lines) => lines.map((line) => line.children[1]?.textContent ?? ""));
     expect(gutter.filter((sign) => sign === "+").length).toBe(2);
     expect(gutter.filter((sign) => sign === "-").length).toBe(1);
     await expect(diff).toContainText("export const b = 20;");

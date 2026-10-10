@@ -180,7 +180,7 @@ export function PaneStatusLabel({ status, shell, paneId }: { status: PaneStatus;
   );
 }
 
-export function Terminal() {
+export function Terminal({ onOpenChanges }: { onOpenChanges?: (returnTo: HTMLElement | null) => void } = {}) {
   const layout = useLayout();
   const agents = useMoshpitStore((s) => s.agents);
   const shells = useMoshpitStore((s) => s.shells);
@@ -412,7 +412,7 @@ export function Terminal() {
           <DisplayOptions onDone={() => surface.current?.focus()} />
         </div>
       </div>
-      {composerAgent && <Composer agent={composerAgent} mode="terminal" quickRepliesSlot={quickSlot} />}
+      {composerAgent && <Composer agent={composerAgent} mode="terminal" quickRepliesSlot={quickSlot} onOpenChanges={onOpenChanges} />}
     </div>
   );
 }

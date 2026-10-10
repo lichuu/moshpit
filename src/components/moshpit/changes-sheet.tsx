@@ -1,10 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronRight, FileDiff, LoaderCircle, RefreshCw, X } from "lucide-react";
+import { ChevronRight, FileDiff, LoaderCircle, MessageSquareText, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { CommentCard, CommentEditor, StaleComments } from "@/components/moshpit/diff-comments";
 import { bridgeUrl } from "@/lib/moshpit/bridge";
 import {
   branchLabel,
+  diffPlaces,
   fetchChanges,
+  lineSite,
   missingFiles,
   omissionText,
   openByDefault,
@@ -16,10 +19,14 @@ import {
   type ChangedFile,
   type Changes,
   type Checkout,
+  type DiffLine,
 } from "@/lib/moshpit/changes";
 import { demoChanges } from "@/lib/moshpit/changes-demo";
+import { draftSessionId, type DraftKey } from "@/lib/moshpit/drafts";
 import { projectOf } from "@/lib/moshpit/label";
+import { commentPlace, reviewCommentLabel, type ReviewComment } from "@/lib/moshpit/review-comments";
 import { useMoshpitStore } from "@/lib/moshpit/store";
+import { ReviewContext, useReview, useReviewState } from "@/lib/moshpit/use-review";
 import type { Agent } from "@/lib/moshpit/types";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +91,7 @@ function Tag({ children }: { children: React.ReactNode }) {
   return <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-2xs text-muted">{children}</span>;
 }
 
-function fileName(file: ChangedFile) {
+function fileName(file: ChangedFile, comments: number) {
   const status = STATUS_LABEL[file.status] ?? file.status;
   const parts = [file.path, status];
   if (file.previousPath) parts.push(`from ${file.previousPath}`);
@@ -93,16 +100,104 @@ function fileName(file: ChangedFile) {
   if (file.added !== null || file.deleted !== null) parts.push(`${file.added ?? 0} added, ${file.deleted ?? 0} removed`);
   const why = omissionText(file);
   if (why) parts.push(why.toLowerCase());
+  if (comments) parts.push(reviewCommentLabel(comments));
   return parts.join(", ");
 }
+
+const LINE_KIND = { add: "Added", del: "Removed", ctx: "Unchanged" } as const;
 
 function Note({ children }: { children: React.ReactNode }) {
   return <p className="border-t border-border px-3 py-3 text-xs text-muted">{children}</p>;
 }
 
+/**
+ * One numbered line of a diff. It is a button: tapping or pressing Enter opens
+ * a comment editor under it, and a saved comment shows there. The row is the
+ * target, so it does not need a precise tap; a horizontal drag still pans the
+ * diff and never counts as a tap.
+ */
+function LineWithComment({
+  file,
+  line,
+  tabStop,
+  onArrow,
+  onFocus,
+  onFinish,
+}: {
+  file: ChangedFile;
+  line: Extract<DiffLine, { number: number }>;
+  tabStop: string | null;
+  onArrow: (event: React.KeyboardEvent<HTMLElement>) => void;
+  onFocus: (place: string) => void;
+  onFinish: (place: string) => void;
+}) {
+  const review = useReview();
+  const site = lineSite(file, line);
+  const place = commentPlace(site);
+  const comment = review.byPlace.get(place);
+  return (
+    <>
+      <button
+        type="button"
+        data-line={place}
+        tabIndex={place === tabStop ? 0 : -1}
+        aria-label={`${LINE_KIND[line.kind]} line ${line.number}: ${line.text}${comment ? ", has a comment" : ""}`}
+        onFocus={() => onFocus(place)}
+        onKeyDown={onArrow}
+        onClick={() => {
+          if (review.writable) review.begin(place);
+        }}
+        className={cn(
+          "flex w-full border-l-2 text-left outline-offset-[-2px] pointer-coarse:min-h-10 pointer-coarse:items-center",
+          comment ? "border-accent" : "border-transparent",
+          line.kind === "add" && "bg-working/10",
+          line.kind === "del" && "bg-red-500/10",
+        )}
+      >
+        <span aria-hidden="true" className="relative w-11 shrink-0 select-none pr-2 text-right tabular-nums text-subtle">
+          {comment ? <MessageSquareText className="absolute left-1 top-1 size-3 text-accent" /> : null}
+          {line.number}
+        </span>
+        {/* The sign is text, so a change reads without its colour. */}
+        <span className={cn("w-4 shrink-0 select-none text-center", line.kind === "add" && "text-working", line.kind === "del" && "text-red-500")}>
+          {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
+        </span>
+        <span className="whitespace-pre pr-3">{line.text || " "}</span>
+      </button>
+      {review.editing === place ? (
+        <CommentEditor
+          site={site}
+          initial={comment?.text ?? ""}
+          full={review.atLimit && !comment}
+          onSave={(text) => {
+            review.save(site, text);
+            onFinish(place);
+          }}
+          onCancel={() => onFinish(place)}
+        />
+      ) : comment ? (
+        <CommentCard
+          comment={comment}
+          writable={review.writable}
+          onEdit={() => review.begin(place)}
+          onRemove={() => {
+            review.remove(comment.id);
+            onFinish(place);
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
 /** One file's diff in mono type. Only an open file builds its lines, so a long list stays light. */
 function DiffView({ changes, file }: { changes: Checkout; file: ChangedFile }) {
+  const review = useReview();
   const [limit, setLimit] = useState(LINES_PER_STEP);
+  // One line is a tab stop at a time; the arrow keys move between lines, so a
+  // long diff is one stop in the sheet's tab order, not thousands.
+  const [focused, setFocused] = useState<string | null>(null);
+  const group = useRef<HTMLDivElement>(null);
   const text = patchOf(changes, file);
   const diff = useMemo(() => parseFileDiff(text), [text]);
   const why = omissionText(file);
@@ -118,15 +213,32 @@ function DiffView({ changes, file }: { changes: Checkout; file: ChangedFile }) {
     hidden += hunk.lines.length - shown.length;
     return { hunk, shown };
   });
+  const places = new Set<string>();
+  for (const { shown } of hunks) for (const line of shown) if (line.kind !== "note") places.add(commentPlace(lineSite(file, line)));
+  const tabStop = focused !== null && places.has(focused) ? focused : (places.values().next().value ?? null);
+  const arrow = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const all = [...(group.current?.querySelectorAll<HTMLElement>("[data-line]") ?? [])];
+    const next = all[all.indexOf(event.currentTarget) + (event.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  };
+  const finish = (place: string) => {
+    review.finish();
+    group.current?.querySelector<HTMLElement>(`[data-line="${CSS.escape(place)}"]`)?.focus();
+  };
 
   return (
     <div className="border-t border-border">
-      {/* The scroll region is focusable so a keyboard can pan a long line. */}
+      {/* The scroll region is focusable so a keyboard can pan a long line. It is
+          a container, so a comment under a line can be as wide as this window. */}
       <div
+        ref={group}
         role="group"
         aria-label={`Diff of ${file.path}`}
         tabIndex={0}
-        className="overflow-x-auto bg-bg-term font-mono text-xs leading-5 outline-offset-[-2px]"
+        className="@container overflow-x-auto bg-bg-term font-mono text-xs leading-5 outline-offset-[-2px]"
       >
         <div className="w-max min-w-full">
           {diff.meta.map((line, index) => (
@@ -144,18 +256,7 @@ function DiffView({ changes, file }: { changes: Checkout; file: ChangedFile }) {
                     {line.text}
                   </div>
                 ) : (
-                  <div key={at} className={cn("flex", line.kind === "add" && "bg-working/10", line.kind === "del" && "bg-red-500/10")}>
-                    <span aria-hidden="true" className="w-11 shrink-0 select-none pr-2 text-right tabular-nums text-subtle">
-                      {line.number}
-                    </span>
-                    {/* The sign is text, so a change reads without its colour. */}
-                    <span
-                      className={cn("w-4 shrink-0 select-none text-center", line.kind === "add" && "text-working", line.kind === "del" && "text-red-500")}
-                    >
-                      {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-                    </span>
-                    <span className="whitespace-pre pr-3">{line.text || " "}</span>
-                  </div>
+                  <LineWithComment key={at} file={file} line={line} tabStop={tabStop} onArrow={arrow} onFocus={setFocused} onFinish={finish} />
                 ),
               )}
             </div>
@@ -175,14 +276,14 @@ function DiffView({ changes, file }: { changes: Checkout; file: ChangedFile }) {
   );
 }
 
-function FileRow({ changes, file, open, onToggle }: { changes: Checkout; file: ChangedFile; open: boolean; onToggle: () => void }) {
+function FileRow({ changes, file, open, comments, onToggle }: { changes: Checkout; file: ChangedFile; open: boolean; comments: number; onToggle: () => void }) {
   const panel = useId();
   const letter = STATUS_LETTER[file.status] ?? "?";
   return (
     <li className="overflow-hidden rounded-lg border border-border bg-surface">
       <button
         type="button"
-        aria-label={fileName(file)}
+        aria-label={fileName(file, comments)}
         aria-expanded={open}
         aria-controls={open ? panel : undefined}
         onClick={onToggle}
@@ -204,8 +305,9 @@ function FileRow({ changes, file, open, onToggle }: { changes: Checkout; file: C
         <span aria-hidden="true" className="min-w-0 flex-1">
           <span className="block break-all font-mono text-xs leading-5">{file.path}</span>
           {file.previousPath ? <span className="block break-all font-mono text-2xs text-subtle">from {file.previousPath}</span> : null}
-          {file.untracked || file.binary || file.omitted ? (
+          {comments || file.untracked || file.binary || file.omitted ? (
             <span className="mt-1 flex flex-wrap gap-1">
+              {comments ? <Tag>{reviewCommentLabel(comments)}</Tag> : null}
               {file.untracked ? <Tag>untracked</Tag> : null}
               {file.binary ? <Tag>binary</Tag> : null}
               {file.omitted ? <Tag>not shown</Tag> : null}
@@ -243,14 +345,31 @@ function TruncationNote({ changes }: { changes: Checkout }) {
 }
 
 function CheckoutView({ changes }: { changes: Checkout }) {
+  const review = useReview();
   const defaults = useMemo(() => openByDefault(changes), [changes]);
   const [chosen, setChosen] = useState<Map<string, boolean>>(() => new Map());
   const total = summarize(changes);
+  // Comments are matched to the diff as it stands, never moved: one whose line
+  // is gone is listed apart instead of being dropped or guessed at.
+  const staged = review.comments.length > 0;
+  const places = useMemo(() => (staged ? diffPlaces(changes) : new Map<string, string>()), [changes, staged]);
+  const stale: ReviewComment[] = [];
+  const perFile = new Map<string, number>();
+  for (const comment of review.comments) {
+    const place = commentPlace(comment);
+    const owner = places.get(place);
+    if (owner === undefined || review.byPlace.get(place) !== comment) stale.push(comment);
+    else perFile.set(owner, (perFile.get(owner) ?? 0) + 1);
+  }
+  const notInDiff = <StaleComments comments={stale} writable={review.writable} onRemove={review.remove} />;
   if (changes.files.length === 0) {
     return (
-      <Message title="No changes" tone="empty">
-        This checkout matches its last commit.
-      </Message>
+      <>
+        <Message title="No changes" tone="empty">
+          This checkout matches its last commit.
+        </Message>
+        {stale.length ? <div className="px-4 pb-4">{notInDiff}</div> : null}
+      </>
     );
   }
   return (
@@ -264,6 +383,7 @@ function CheckoutView({ changes }: { changes: Checkout }) {
         </span>
       </p>
       {changes.truncated ? <TruncationNote changes={changes} /> : null}
+      {notInDiff}
       <ul className="space-y-2">
         {changes.files.map((file) => (
           <FileRow
@@ -271,6 +391,7 @@ function CheckoutView({ changes }: { changes: Checkout }) {
             changes={changes}
             file={file}
             open={chosen.get(file.path) ?? defaults.has(file.path)}
+            comments={perFile.get(file.path) ?? 0}
             onToggle={() =>
               setChosen((held) => {
                 const next = new Map(held);
@@ -316,9 +437,13 @@ function Body({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { state, load } = useChanges(url, agent, demo);
   const refreshing = state.phase === "loading" || (state.phase === "ready" && state.refreshing);
   const checkout = state.phase === "ready" && state.changes.kind === "checkout" ? state.changes : undefined;
+  // The agent's draft, where the composer keeps its text and its comments.
+  const hostId = useMoshpitStore((s) => s.connectedHostId) ?? "disconnected";
+  const draftKey: DraftKey = [hostId, draftSessionId(agent, demo), "conversation"];
+  const review = useReviewState(draftKey);
 
   return (
-    <>
+    <ReviewContext.Provider value={review}>
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:pt-4">
         <div className="min-w-0 flex-1">
           <Dialog.Title className="text-lg font-medium leading-tight tracking-tight">Changes</Dialog.Title>
@@ -358,14 +483,19 @@ function Body({ agent, onClose }: { agent: Agent; onClose: () => void }) {
             {state.message}
           </Message>
         ) : state.changes.kind === "not-a-checkout" ? (
-          <Message tone="empty" title="Not a git checkout">
-            This pane's directory is not inside a git repository, so there is nothing to compare.
-          </Message>
+          <>
+            <Message tone="empty" title="Not a git checkout">
+              This pane's directory is not inside a git repository, so there is nothing to compare.
+            </Message>
+            <div className="px-4 pb-4">
+              <StaleComments comments={review.comments} writable={review.writable} onRemove={review.remove} />
+            </div>
+          </>
         ) : (
           <CheckoutView changes={state.changes} />
         )}
       </div>
-    </>
+    </ReviewContext.Provider>
   );
 }
 
@@ -395,7 +525,13 @@ export function ChangesSheet({
             event.preventDefault();
             restoreFocus()?.focus();
           }}
-          className="fixed inset-0 z-50 flex flex-col bg-bg shadow-xl lg:left-auto lg:w-[min(56rem,calc(100vw-5rem))] lg:border-l lg:border-border"
+          // Escape in a comment editor cancels the editor, not the sheet.
+          onEscapeKeyDown={(event) => {
+            if (event.target instanceof Element && event.target.closest("[data-comment-editor]")) event.preventDefault();
+          }}
+          // Sized like the app itself: while the soft keyboard is up the sheet
+          // ends where the keyboard begins, so a comment field is never under it.
+          className="fixed inset-x-0 bottom-0 top-[var(--app-top,0px)] z-50 flex h-[var(--app-height,auto)] flex-col bg-bg shadow-xl lg:left-auto lg:w-[min(56rem,calc(100vw-5rem))] lg:border-l lg:border-border"
         >
           <Body key={agent.id} agent={agent} onClose={onClose} />
         </Dialog.Content>

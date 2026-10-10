@@ -81,7 +81,7 @@ function demoConversation(
   };
 }
 
-export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
+export function Steer({ onOpenChanges }: { view: Exclude<AgentView, "terminal">; onOpenChanges?: (returnTo: HTMLElement | null) => void }) {
   const layout = useLayout();
   const wideDetail =
     layout.pane.kind === "pair" && layout.pane.pair === "pit-steer";
@@ -241,6 +241,7 @@ export function Steer(_props: { view: Exclude<AgentView, "terminal"> }) {
           sessionId={sessionId}
           nativePane={nativePane}
           onDelivered={delivered}
+          onOpenChanges={onOpenChanges}
           context={available?.context}
           liveQuestion={agent.blockedDialog?.kind === "choose" && agent.blockedDialog.family === "claude-ask-user-review-v1"
             ? false
