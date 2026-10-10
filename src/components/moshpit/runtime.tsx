@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { blockedCount, useMoshpitStore } from "@/lib/moshpit/store";
 import { probeBridgeOrigin } from "@/lib/moshpit/bridge";
 import { breadcrumb } from "@/lib/moshpit/blackbox";
+import { armAudio, useAudioStatus } from "@/lib/moshpit/cues";
 import { WIDE_MIN_PX } from "@/lib/moshpit/layout";
 import type { TabId } from "@/lib/moshpit/types";
 import {
@@ -47,26 +48,62 @@ function applySearch(search: string) {
 /**
  * Agents waiting on you, in the tab title and on the installed app's icon, so
  * a blocked agent is visible from another tab or the home screen. Counted the
- * way the nav badge counts: only with a host connected.
+ * way the nav badge counts: only with a host connected. The icon follows a real
+ * host only: the demo's agents are fixtures, so it never touches the badge.
  */
 function useWaitingBadge() {
   const waiting = useMoshpitStore((s) =>
     s.connectedHostId ? blockedCount(s.agents) : 0,
   );
+  const demo = useMoshpitStore(
+    (s) => s.hosts.find((h) => h.id === s.connectedHostId)?.demo ?? false,
+  );
+  const shown = useRef(0);
   useEffect(() => {
     document.title = waiting ? `(${waiting}) moshpit` : "moshpit";
+  }, [waiting]);
+  useEffect(() => {
     // Badging is installed-PWA only and absent in Firefox; a refusal is fine.
     const nav = navigator as Navigator & {
       setAppBadge?: (n: number) => Promise<void>;
       clearAppBadge?: () => Promise<void>;
     };
-    const done = waiting ? nav.setAppBadge?.(waiting) : nav.clearAppBadge?.();
-    done?.catch(() => {});
-  }, [waiting]);
+    if (typeof nav.setAppBadge !== "function" || typeof nav.clearAppBadge !== "function") return;
+    const count = demo ? 0 : waiting;
+    // In the demo, only take down a count that a real host put up.
+    if (demo && !shown.current) return;
+    shown.current = count;
+    try {
+      const done = count ? nav.setAppBadge(count) : nav.clearAppBadge();
+      done?.catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  }, [waiting, demo]);
+}
+
+/**
+ * C8: browsers start audio only from a gesture. With the sound on, the first
+ * tap or key press after each page load (and after the system suspends the
+ * context) starts it. Nothing here plays a sound.
+ */
+function useCueArming() {
+  const on = useMoshpitStore((s) => s.settings.cueSound === true);
+  const audio = useAudioStatus();
+  useEffect(() => {
+    if (!on || audio !== "waiting") return;
+    const arm = () => void armAudio();
+    const events = ["pointerdown", "pointerup", "keydown"] as const;
+    for (const name of events) window.addEventListener(name, arm, true);
+    return () => {
+      for (const name of events) window.removeEventListener(name, arm, true);
+    };
+  }, [on, audio]);
 }
 
 export function MoshpitRuntime({ onReady }: { onReady: (ready: boolean) => void }) {
   useWaitingBadge();
+  useCueArming();
   const tick = useMoshpitStore((s) => s.tick);
   const onboarded = useMoshpitStore((s) => s.onboarded);
   const theme = useMoshpitStore((s) => s.settings.theme);

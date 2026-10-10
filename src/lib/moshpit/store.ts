@@ -3,6 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { toast } from "sonner";
 import { CURRENT_RELEASE } from "@/lib/moshpit/releases";
 import { inboxUnread, makeEvent, newId } from "./events";
+import { cueTransition, openBlockedIds, playCue } from "./cues";
+import { WIDE_MIN_PX } from "./layout";
 import { encodeImage, fetchSnapshot, fetchRequesterLogin, inspectPushSupport, consumePairing, discoverAccess, checkDeviceCredential, postAction, postLogin, postLogout, registerPush, updatePushSubscription, type KeyInput, type Snapshot, connectRefusal, diagnoseBridge, unregisterPush } from "./bridge";
 import { mergeLinks, pruneStaleLinks, splitLinkKey } from "./links";
 import { credentials, hostAccess, watchAccess, setHostAccess } from "./access";
@@ -352,11 +354,7 @@ function applySnapshot(
   // An agent already blocked when the app opened never transitions, so a
   // transition-only rule leaves the Inbox empty in exactly the case you opened
   // the app for. Ensure every blocked agent has an open row.
-  const openBlocked = new Set(
-    s.events
-      .filter((e) => e.kind === "blocked" && !e.resolved)
-      .map((e) => e.agentId),
-  );
+  const openBlocked = openBlockedIds(s.events);
   const missing = agents
     .filter((a) => a.status === "blocked" && !openBlocked.has(a.id))
     .map((a) => makeEvent(a.id, "blocked", a.blockedPrompt || a.lastOutput));
@@ -397,6 +395,23 @@ function applySnapshot(
     agentLinks,
     ...extra,
   };
+}
+
+// Whether the pane for this agent is on screen: its detail open on a phone, or
+// selected in the detail pane beside the list or Inbox on a wide layout.
+function agentOnScreen(
+  s: Pick<MoshpitState, "detailAgentId" | "selectedAgentId" | "selectedShellId" | "tab" | "herdrRunning">,
+  id: string,
+) {
+  if (s.detailAgentId === id) return true;
+  const wide = window.innerWidth >= WIDE_MIN_PX;
+  return (
+    wide &&
+    (s.tab === "moshpit" || s.tab === "inbox") &&
+    s.herdrRunning &&
+    !s.selectedShellId &&
+    s.selectedAgentId === id
+  );
 }
 
 function closeLocal(s: MoshpitState, target: string): Partial<MoshpitState> {
@@ -657,6 +672,7 @@ export const useMoshpitStore = create<MoshpitState>()(
         voice: true,
         notify: false,
         notifyText: "full",
+        cueSound: false,
         theme: "moshpit-dark",
         // Off, or a light device would resolve the dark default to its light
         // sibling and the app would not open dark for anyone but dark-mode
@@ -1816,6 +1832,8 @@ export const useMoshpitStore = create<MoshpitState>()(
           lastOutput: "Need a decision before I continue — proceed? y/n",
         };
         notifyBlocked(blocked, settings.notify);
+        // The demo's own transition, so the cue can be heard without a host.
+        playCue("blocked", settings.cueSound);
       },
 
       resetDemo: () => {
@@ -1871,6 +1889,13 @@ export const useMoshpitStore = create<MoshpitState>()(
                   );
                 }
               }
+              // The first snapshot of a connection, and the first after the
+              // poll had failed, only set the baseline: every blocked agent
+              // would otherwise "become" blocked at once.
+              const cue =
+                s.snapshotHostId === host.id && !s.connectError
+                  ? cueTransition(s.agents, snap.agents, openBlockedIds(s.events), (id) => agentOnScreen(s, id))
+                  : null;
               const next = applySnapshot(s, snap);
               set({
                 ...next,
@@ -1879,6 +1904,7 @@ export const useMoshpitStore = create<MoshpitState>()(
                   ? capEvents([...(next.events ?? s.events), ...extra])
                   : next.events,
               });
+              if (cue) playCue(cue, get().settings.cueSound);
             })
             .catch(() => {
               if (get().connectedHostId !== host.id) return;
@@ -1985,7 +2011,9 @@ export const useMoshpitStore = create<MoshpitState>()(
           settings: {
             ...current.settings,
             ...p.settings,
-            // Persisted settings are untrusted; an unknown level reads as full.
+            // Persisted settings are untrusted; an unknown sound value reads as off.
+            cueSound: p.settings?.cueSound === true,
+            // An unknown level reads as full.
             notifyText: ["full", "name", "generic"].includes(p.settings?.notifyText as string)
               ? (p.settings?.notifyText as PushPrivacy)
               : "full",
