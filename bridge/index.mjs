@@ -18,6 +18,7 @@ import { listAgentCommands, scopedCatalog, CommandScopeError, ScanStoppedError, 
 import { createDiagnosticLimiter, DiagnosticError, MAX_DIAGNOSTIC_BYTES, parseDiagnostic } from "./diagnostics.mjs";
 import { createUploads, MAX_PROMPT_BODY, RequestError, readUploadedImage } from "./upload.mjs";
 import { safeJoin } from "./paths.mjs";
+import { ChangesError, changesDirectory, createChanges, parseChangesQuery } from "./changes.mjs";
 import { createSessionReader } from "./sessions.mjs";
 import { createSubmissions } from "./submissions.mjs";
 import { createBrowserBoundary, createIdentitySecurity, isApiPath } from "./security.mjs";
@@ -113,6 +114,7 @@ const herdr = createHerdr({
 const uploads = await createUploads({ stateDir: STATE_DIR });
 const diagnosticLimiter = createDiagnosticLimiter();
 const sessionReader = createSessionReader();
+const changes = createChanges();
 const submissions = createSubmissions({
   stateDir: STATE_DIR,
   herdr,
@@ -645,6 +647,29 @@ const server = createServer(async (req, res) => {
       });
       if (value.kind === "available" && herdr.capabilities) value.capabilities = await herdr.capabilities(agent);
       json(res, 200, value);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/changes") {
+      // The pane is the only input. Its directory comes from the herdr
+      // snapshot, so no client text ever reaches a path or a git argument.
+      const controller = new AbortController();
+      const onClose = () => { if (!res.writableEnded) controller.abort(); };
+      res.on("close", onClose);
+      try {
+        const directory = changesDirectory(await herdr.snapshot(), parseChangesQuery(url.searchParams));
+        json(res, 200, await changes.read(directory, { signal: controller.signal }));
+      } catch (err) {
+        if (res.writableEnded || controller.signal.aborted) return;
+        if (err instanceof ChangesError) {
+          if (err.retryAfter) res.setHeader("retry-after", err.retryAfter);
+          json(res, err.status, { error: { code: err.code, message: err.message } });
+        } else {
+          console.error("changes read failed:", err);
+          json(res, 500, { error: { code: "changes_failed", message: "Reading the changes failed." } });
+        }
+      } finally {
+        res.off("close", onClose);
+      }
       return;
     }
     if (req.method === "GET" && pathname === "/api/upload") {

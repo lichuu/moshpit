@@ -1,0 +1,181 @@
+import { z } from "zod";
+import { accessError } from "./access";
+import { headers } from "./bridge";
+
+// C3: what has this agent changed so far? The bridge answers from the pane's
+// own checkout; the client only ever names the pane.
+
+const Range = z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]);
+const Count = z.number().int().nonnegative().nullable();
+
+const ChangedFileSchema = z.object({
+  path: z.string().min(1).max(4096),
+  previousPath: z.string().min(1).max(4096).optional(),
+  status: z.string().max(32),
+  added: Count,
+  deleted: Count,
+  binary: z.boolean(),
+  untracked: z.boolean(),
+  /** Why this file's diff is missing: the patch filled up, the file is too large, or it is not a plain file. */
+  omitted: z.string().max(32).optional(),
+  /** Where this file's text sits in `patch`. */
+  patch: Range.optional(),
+});
+
+const ChangesSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("not-a-checkout") }),
+  z.object({
+    kind: z.literal("checkout"),
+    repo: z.string().max(1024),
+    branch: z.string().max(1024).nullable(),
+    detached: z.boolean(),
+    head: z.string().max(64).nullable(),
+    files: z.array(ChangedFileSchema).max(1000),
+    /** Every changed file, including those past the list's cap. */
+    fileCount: z.number().int().nonnegative(),
+    patch: z.string().max(4 * 1024 * 1024),
+    truncated: z.boolean(),
+  }),
+]);
+
+export type ChangedFile = z.infer<typeof ChangedFileSchema>;
+export type Changes = z.infer<typeof ChangesSchema>;
+export type Checkout = Extract<Changes, { kind: "checkout" }>;
+
+export async function fetchChanges(url: string, target: string, signal?: AbortSignal): Promise<Changes> {
+  const res = await fetch(`${url}/api/changes?target=${encodeURIComponent(target)}`, {
+    headers: headers(url),
+    redirect: "error",
+    cache: "no-store",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw await accessError(res, url, "changes", signal);
+  const result = ChangesSchema.safeParse(await res.json().catch(() => null));
+  if (!result.success) throw new Error("The bridge returned an unusable changes response.");
+  return result.data;
+}
+
+export type DiffLine =
+  | { kind: "add" | "del" | "ctx"; text: string; number: number }
+  | { kind: "note"; text: string };
+export type DiffHunk = { header: string; lines: DiffLine[] };
+export type FileDiff = { meta: string[]; hunks: DiffHunk[]; lineCount: number };
+
+// Git's own header lines say nothing the file row does not: the paths, the
+// blob IDs, the old and new file names.
+const PLUMBING = /^(diff --git |index |--- |\+\+\+ |rename from |rename to |similarity index |dissimilarity index )/;
+const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+/**
+ * One file's piece of the patch, as hunks of numbered lines. An added or
+ * context line carries its new line number, a removed line its old one: one
+ * gutter, which is what fits beside the code on a phone.
+ */
+export function parseFileDiff(text: string): FileDiff {
+  const meta: string[] = [];
+  const hunks: DiffHunk[] = [];
+  let hunk: DiffHunk | undefined;
+  let oldAt = 0;
+  let newAt = 0;
+  let lineCount = 0;
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  for (const line of lines) {
+    const start = HUNK.exec(line);
+    if (start) {
+      oldAt = Number(start[1]);
+      newAt = Number(start[2]);
+      hunk = { header: line, lines: [] };
+      hunks.push(hunk);
+      continue;
+    }
+    if (!hunk) {
+      if (!PLUMBING.test(line)) meta.push(line);
+      continue;
+    }
+    lineCount += 1;
+    const sign = line[0];
+    const body = line.slice(1);
+    if (sign === "+") hunk.lines.push({ kind: "add", text: body, number: newAt++ });
+    else if (sign === "-") hunk.lines.push({ kind: "del", text: body, number: oldAt++ });
+    else if (sign === "\\") hunk.lines.push({ kind: "note", text: line.slice(2) });
+    else {
+      hunk.lines.push({ kind: "ctx", text: body, number: newAt });
+      oldAt += 1;
+      newAt += 1;
+    }
+  }
+  return { meta, hunks, lineCount };
+}
+
+export function summarize(changes: Checkout) {
+  let added = 0;
+  let deleted = 0;
+  for (const file of changes.files) {
+    added += file.added ?? 0;
+    deleted += file.deleted ?? 0;
+  }
+  return { files: Math.max(changes.fileCount, changes.files.length), added, deleted };
+}
+
+export const STATUS_LABEL: Record<string, string> = {
+  added: "Added",
+  modified: "Modified",
+  deleted: "Deleted",
+  renamed: "Renamed",
+  typechange: "Type changed",
+  unmerged: "Conflict",
+};
+
+export const STATUS_LETTER: Record<string, string> = {
+  added: "A",
+  modified: "M",
+  deleted: "D",
+  renamed: "R",
+  typechange: "T",
+  unmerged: "U",
+};
+
+/** Why a file has no diff text, in the words the sheet shows. */
+export function omissionText(file: ChangedFile): string | undefined {
+  switch (file.omitted) {
+    case undefined:
+      return undefined;
+    case "too-large":
+      return "Too large to show";
+    case "not-a-file":
+      return "Not a plain file, so there is no text to show";
+    default:
+      return "Left out: the diff reached its size limit";
+  }
+}
+
+/** Files whose diff text was cut or never produced, for the truncation note. */
+export function missingFiles(changes: Checkout): ChangedFile[] {
+  return changes.files.filter((file) => file.omitted);
+}
+
+/** A file's slice of the patch, or an empty string when it has none. */
+export function patchOf(changes: Checkout, file: ChangedFile): string {
+  return file.patch ? changes.patch.slice(file.patch[0], file.patch[1]) : "";
+}
+
+/** The branch as the sheet names it. */
+export function branchLabel(changes: Checkout): string {
+  if (changes.branch) return changes.branch;
+  if (changes.detached) return changes.head ? `detached at ${changes.head}` : "detached HEAD";
+  return "no branch";
+}
+
+/** Small diffs open by themselves; a long list opens none, so the list itself stays scannable. */
+export const OPEN_BY_DEFAULT_FILES = 4;
+export const OPEN_BY_DEFAULT_LINES = 300;
+
+export function openByDefault(changes: Checkout): Set<string> {
+  if (changes.files.length > OPEN_BY_DEFAULT_FILES) return new Set();
+  const open = new Set<string>();
+  for (const file of changes.files) {
+    if (file.patch && !file.binary && (file.added ?? 0) + (file.deleted ?? 0) <= OPEN_BY_DEFAULT_LINES) open.add(file.path);
+  }
+  return open;
+}
