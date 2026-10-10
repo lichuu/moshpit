@@ -16,8 +16,12 @@ import {
   createTransitionTracker,
   describePushFailure,
   openPushStore,
+  parsePushPrivacy,
   parsePushSubscription,
+  pushPayloadFor,
+  pushPrivacyOf,
   PUSH_HOSTS,
+  PUSH_PRIVACY_LEVELS,
   pushAvailability,
 } from "./push-delivery.mjs";
 
@@ -393,6 +397,72 @@ test("a saved subscription outside the allowlist is skipped and named", async ()
       "push skipped for push.example: Push endpoint host push.example is not a known push service (fcm.googleapis.com, updates.push.services.mozilla.com, web.push.apple.com).",
       "push skipped for fcm.googleapis.com: Invalid push subscription.",
     ]);
+  } finally {
+    await rig.done();
+  }
+});
+
+const FULL_PAYLOAD = { type: "block", agent: "w1:p2", name: "refactor-auth", prompt: "Allow rm -rf build?", url: "/?tab=steer&agent=w1:p2" };
+
+test("each privacy level carries exactly its allowed fields", () => {
+  assert.deepEqual(PUSH_PRIVACY_LEVELS, ["full", "name", "generic"]);
+  assert.deepEqual(pushPayloadFor(FULL_PAYLOAD, "full"), FULL_PAYLOAD);
+  assert.deepEqual(pushPayloadFor(FULL_PAYLOAD, "name"), { type: "block", agent: "w1:p2", name: "refactor-auth", url: "/?tab=steer&agent=w1:p2" });
+  assert.deepEqual(pushPayloadFor(FULL_PAYLOAD, "generic"), { type: "block", url: "/?tab=steer&agent=w1:p2" });
+  // A field the sender left undefined is absent, not present and empty, and an
+  // extra field is never passed through.
+  const turn = { type: "turn", agent: "w1:p2", name: "refactor-auth", prompt: undefined, url: "/", output: "secret" };
+  assert.deepEqual(Object.keys(pushPayloadFor(turn, "full")), ["type", "agent", "name", "url"]);
+  assert.deepEqual(Object.keys(pushPayloadFor(turn, "generic")), ["type", "url"]);
+  const wire = JSON.stringify(pushPayloadFor(FULL_PAYLOAD, "generic"));
+  for (const withheld of ["refactor-auth", "rm -rf", "name", "prompt"]) assert.ok(!wire.includes(withheld), withheld);
+});
+
+test("a missing or unknown stored level sends in full, and a bad requested level is rejected", () => {
+  for (const entry of [undefined, null, {}, { privacy: undefined }, { privacy: "everything" }, { privacy: 2 }, { privacy: "FULL" }])
+    assert.equal(pushPrivacyOf(entry), "full", JSON.stringify(entry));
+  for (const level of PUSH_PRIVACY_LEVELS) {
+    assert.equal(pushPrivacyOf({ privacy: level }), level);
+    assert.equal(parsePushPrivacy(level), level);
+  }
+  for (const bad of ["everything", "", "FULL", null, 1, ["full"], {}, true]) {
+    assert.throws(() => parsePushPrivacy(bad), (error) => {
+      assert.equal(error.status, 400);
+      assert.equal(error.code, "push_privacy_invalid");
+      assert.match(error.message, /full, name, generic/);
+      return true;
+    }, JSON.stringify(bad));
+  }
+});
+
+test("delivery builds each device's payload at its own level and rereads it at send time", async () => {
+  const rig = await deliveryRig(["open", "named", "plain", "legacy", "odd"]);
+  try {
+    await rig.pushStore.update((list) => ({
+      ...list,
+      "open-id": { ...list["open-id"], privacy: "full" },
+      "named-id": { ...list["named-id"], privacy: "name" },
+      "plain-id": { ...list["plain-id"], privacy: "generic" },
+      "odd-id": { ...list["odd-id"], privacy: "future-level" },
+    }));
+    await rig.deliver([FULL_PAYLOAD]);
+    const bodies = Object.fromEntries(rig.requests.map((r) => [r.endpoint.split("/").pop(), r.body]));
+    assert.deepEqual(bodies.open, FULL_PAYLOAD);
+    assert.deepEqual(bodies.named, { type: "block", agent: "w1:p2", name: "refactor-auth", url: FULL_PAYLOAD.url });
+    assert.deepEqual(bodies.plain, { type: "block", url: FULL_PAYLOAD.url });
+    assert.deepEqual(bodies.legacy, FULL_PAYLOAD, "a subscription saved before the setting existed is sent in full");
+    assert.deepEqual(bodies.odd, FULL_PAYLOAD, "an unknown stored level is sent in full");
+
+    // Raising privacy while an earlier send is in flight applies to the next one.
+    rig.requests.length = 0;
+    let release;
+    rig.respond = (subscription) => subscription.endpoint.endsWith("/open") ? new Promise((resolve) => (release = resolve)) : undefined;
+    const running = rig.deliver([FULL_PAYLOAD]);
+    await new Promise((resolve) => setImmediate(resolve));
+    await rig.pushStore.update((list) => ({ ...list, "named-id": { ...list["named-id"], privacy: "generic" } }));
+    release();
+    await running;
+    assert.deepEqual(rig.requests.find((r) => r.endpoint.endsWith("/named")).body, { type: "block", url: FULL_PAYLOAD.url });
   } finally {
     await rig.done();
   }
