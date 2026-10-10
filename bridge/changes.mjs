@@ -21,6 +21,10 @@ export const GIT_TIMEOUT_MS = 10_000;
 export const READ_DEADLINE_MS = 30_000;
 /** Reads running at once on this bridge. */
 export const MAX_READS = 4;
+/** C11: no count in a summary goes past this; a count that reaches it is a floor. */
+export const COUNT_CAP = 1000;
+/** What a summary's status call may print before it is cut. */
+export const SUMMARY_LIST_CAP = 512 * 1024;
 
 const UNTRACKED_BATCH = 4;
 const SNIFF_BYTES = 8000;
@@ -134,14 +138,28 @@ function parseStatus({ stdout, capped }) {
   const parts = tokens(stdout, capped);
   let head = null;
   let oid = null;
+  let ahead = null;
   const untracked = [];
+  let staged = 0;
+  let unstaged = 0;
+  let uncommitted = 0;
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i];
     if (part.startsWith("# branch.head ")) head = part.slice("# branch.head ".length);
     else if (part.startsWith("# branch.oid ")) oid = part.slice("# branch.oid ".length);
+    // Printed only while the upstream ref exists in this repository.
+    else if (part.startsWith("# branch.ab ")) ahead = Number(/^# branch\.ab \+(\d+) /.exec(part)?.[1] ?? Number.NaN);
     else if (part.startsWith("? ")) untracked.push(part.slice(2));
-    // A rename entry carries its original path as a token of its own.
-    else if (part.startsWith("2 ")) i += 1;
+    else if (/^[12u] /.test(part)) {
+      // XY: the index column, then the worktree column; "." means unchanged.
+      // An unmerged entry is a conflict still to resolve, so it counts as unstaged.
+      const conflict = part[0] === "u";
+      if (part[2] !== "." && !conflict) staged += 1;
+      if (part[3] !== "." || conflict) unstaged += 1;
+      uncommitted += 1;
+      // A rename entry carries its original path as a token of its own.
+      if (part[0] === "2") i += 1;
+    }
   }
   const hasCommits = oid !== null && oid !== "(initial)";
   const detached = head === "(detached)";
@@ -151,6 +169,10 @@ function parseStatus({ stdout, capped }) {
     head: hasCommits ? oid.slice(0, 7) : null,
     hasCommits,
     untracked,
+    ahead: Number.isFinite(ahead) ? ahead : null,
+    staged,
+    unstaged,
+    uncommitted,
   };
 }
 
@@ -261,7 +283,7 @@ function countLines(chunk) {
 export function createChanges({ gitBin = "git", timeoutMs = GIT_TIMEOUT_MS, deadlineMs = READ_DEADLINE_MS } = {}) {
   let active = 0;
 
-  async function readOnce(directory, signal) {
+  async function readOnce(directory, signal, inspect) {
     const env = gitEnvironment();
     const git = (args, options = {}) => runGit(gitBin, args, { env, signal, maxBuffer: LIST_CAP, timeout: timeoutMs, ...options });
 
@@ -284,13 +306,15 @@ export function createChanges({ gitBin = "git", timeoutMs = GIT_TIMEOUT_MS, dead
     if (!root) return { kind: "not-a-checkout" };
     const scratch = await mkdtemp(path.join(tmpdir(), "moshpit-changes-index-"));
     try {
-      return await readCheckout(root, scratch, git, signal);
+      return await inspect(root, scratch, git, signal);
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }
   }
 
-  async function readCheckout(root, scratch, git, signal) {
+  // Git for everything past finding the checkout, shared by every kind of read:
+  // a private copy of the index, and every configured filter driver blanked.
+  async function privateGit(root, scratch, git, signal) {
     const inRoot = { cwd: root };
 
     // `git diff` refreshes the index it reads, and writes it back even with
@@ -327,8 +351,12 @@ export function createChanges({ gitBin = "git", timeoutMs = GIT_TIMEOUT_MS, dead
         count += 1;
       }
     }
-    const readGit = (args, options = {}) =>
+    return (args, options = {}) =>
       runGit(gitBin, args, { env: gitEnvironment({ GIT_INDEX_FILE: privateIndex, ...(count ? { GIT_CONFIG_COUNT: String(count), ...blanked } : {}) }), signal, maxBuffer: LIST_CAP, timeout: timeoutMs, ...inRoot, ...options });
+  }
+
+  async function readCheckout(root, scratch, git, signal) {
+    const readGit = await privateGit(root, scratch, git, signal);
 
     const status = await readGit(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignore-submodules=all"]);
     if (status.failed) throw new Error("git status failed");
@@ -436,6 +464,60 @@ export function createChanges({ gitBin = "git", timeoutMs = GIT_TIMEOUT_MS, dead
     };
   }
 
+  // C11: is there work here that closing the pane could strand? Counts only:
+  // no patch text and no per-file diff, and nothing is fetched. "Unpushed" is
+  // judged from refs as they are in this repository.
+  async function summarizeCheckout(root, scratch, git, signal) {
+    const readGit = await privateGit(root, scratch, git, signal);
+    const status = await readGit(["status", "--porcelain=v2", "--branch", "--ahead-behind", "-z", "--untracked-files=all", "--ignore-submodules=all"], {
+      maxBuffer: SUMMARY_LIST_CAP,
+    });
+    if (status.failed) throw new Error("git status failed");
+    const state = parseStatus(status);
+
+    // How many commits of HEAD are on nothing else. The walk stops at the cap.
+    const commitsNotOn = async (...refs) => {
+      const walk = await readGit(["rev-list", "--count", `--max-count=${COUNT_CAP}`, "HEAD", "--not", ...refs, "--"], { maxBuffer: 64 * 1024 });
+      if (walk.failed) throw new Error("git rev-list failed");
+      return Number(walk.stdout.toString("utf8").trim()) || 0;
+    };
+    let unpushed = 0;
+    let basis;
+    if (!state.hasCommits) {
+      basis = "no-commits";
+    } else if (state.ahead !== null) {
+      // The branch's upstream ref as it is here, however stale.
+      unpushed = state.ahead;
+      basis = "upstream";
+    } else if (state.detached) {
+      // On no branch: a commit that no branch and no remote-tracking ref reaches.
+      unpushed = await commitsNotOn("--branches", "--remotes");
+      basis = "detached";
+    } else {
+      // No upstream (or its ref is gone). Without any remote nothing is "unpushed".
+      const remotes = await readGit(["remote"], { maxBuffer: 64 * 1024 });
+      if (remotes.failed) throw new Error("git remote failed");
+      if (remotes.stdout.toString("utf8").trim() === "") {
+        basis = "local-only";
+      } else {
+        unpushed = await commitsNotOn("--remotes");
+        basis = "remotes";
+      }
+    }
+
+    const counts = {
+      staged: state.staged,
+      unstaged: state.unstaged,
+      uncommitted: state.uncommitted,
+      untracked: state.untracked.length,
+      unpushed,
+    };
+    // A count at the cap is a floor, and so is every count after a cut listing.
+    const truncated = status.capped || Object.values(counts).some((value) => value >= COUNT_CAP);
+    for (const name of Object.keys(counts)) counts[name] = Math.min(counts[name], COUNT_CAP);
+    return { kind: "checkout", branch: state.branch, detached: state.detached, counts, unpushedBasis: basis, truncated };
+  }
+
   // The patch for one file that git does not track yet. Null when the file
   // vanished between the listing and now.
   async function newFile(entry, root, readGit) {
@@ -471,22 +553,27 @@ export function createChanges({ gitBin = "git", timeoutMs = GIT_TIMEOUT_MS, dead
     return { file: { path: name, status: "added", added: null, deleted: null, binary: false, untracked, omitted: "patch-cap" } };
   }
 
+  // One read of either kind: the same limit, deadline and error classes.
+  async function guarded(directory, signal, inspect) {
+    if (active >= MAX_READS) throw new ChangesError(429, "changes_busy", "Other change reads are still running. Try again in a moment.", 2);
+    active += 1;
+    const deadline = AbortSignal.timeout(deadlineMs);
+    const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    try {
+      return await readOnce(directory, combined, inspect);
+    } catch (error) {
+      if (error instanceof ChangesError) throw error;
+      if (deadline.aborted) throw new ChangesError(504, "changes_timeout", "Git took too long to answer.");
+      throw error;
+    } finally {
+      active -= 1;
+    }
+  }
+
   return {
     /** Reads the changes in `directory`: a path the caller took from the herdr snapshot. */
-    async read(directory, { signal } = {}) {
-      if (active >= MAX_READS) throw new ChangesError(429, "changes_busy", "Other change reads are still running. Try again in a moment.", 2);
-      active += 1;
-      const deadline = AbortSignal.timeout(deadlineMs);
-      const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
-      try {
-        return await readOnce(directory, combined);
-      } catch (error) {
-        if (error instanceof ChangesError) throw error;
-        if (deadline.aborted) throw new ChangesError(504, "changes_timeout", "Git took too long to answer.");
-        throw error;
-      } finally {
-        active -= 1;
-      }
-    },
+    read: (directory, { signal } = {}) => guarded(directory, signal, readCheckout),
+    /** C11: counts of work a closed pane could leave behind, for the same kind of directory. */
+    summary: (directory, { signal } = {}) => guarded(directory, signal, summarizeCheckout),
   };
 }

@@ -649,15 +649,17 @@ const server = createServer(async (req, res) => {
       json(res, 200, value);
       return;
     }
-    if (req.method === "GET" && pathname === "/api/changes") {
+    if (req.method === "GET" && (pathname === "/api/changes" || pathname === "/api/changes/summary")) {
       // The pane is the only input. Its directory comes from the herdr
       // snapshot, so no client text ever reaches a path or a git argument.
+      // The summary (C11) is the same read, reduced to counts.
       const controller = new AbortController();
       const onClose = () => { if (!res.writableEnded) controller.abort(); };
       res.on("close", onClose);
       try {
         const directory = changesDirectory(await herdr.snapshot(), parseChangesQuery(url.searchParams));
-        json(res, 200, await changes.read(directory, { signal: controller.signal }));
+        const read = pathname === "/api/changes" ? changes.read : changes.summary;
+        json(res, 200, await read(directory, { signal: controller.signal }));
       } catch (err) {
         if (res.writableEnded || controller.signal.aborted) return;
         if (err instanceof ChangesError) {

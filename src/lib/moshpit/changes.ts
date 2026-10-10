@@ -56,6 +56,66 @@ export async function fetchChanges(url: string, target: string, signal?: AbortSi
   return result.data;
 }
 
+// C11: counts of work a closed pane could strand, for the Close dialog.
+
+const SummaryCount = z.number().int().nonnegative().max(1000);
+
+const ChangesSummarySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("not-a-checkout") }),
+  z.object({
+    kind: z.literal("checkout"),
+    branch: z.string().max(1024).nullable(),
+    detached: z.boolean(),
+    counts: z.object({
+      staged: SummaryCount,
+      unstaged: SummaryCount,
+      /** Files with a staged or an unstaged change, each once. */
+      uncommitted: SummaryCount,
+      untracked: SummaryCount,
+      unpushed: SummaryCount,
+    }),
+    /** What "unpushed" was measured against. */
+    unpushedBasis: z.enum(["upstream", "remotes", "detached", "local-only", "no-commits"]),
+    /** A count that reached the bridge's cap is a floor. */
+    truncated: z.boolean(),
+  }),
+]);
+
+export type ChangesSummary = z.infer<typeof ChangesSummarySchema>;
+
+export async function fetchChangesSummary(url: string, target: string, signal?: AbortSignal, timeoutMs = 20_000): Promise<ChangesSummary> {
+  const res = await fetch(`${url}/api/changes/summary?target=${encodeURIComponent(target)}`, {
+    headers: headers(url),
+    redirect: "error",
+    cache: "no-store",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw await accessError(res, url, "changes summary", signal);
+  const result = ChangesSummarySchema.safeParse(await res.json().catch(() => null));
+  if (!result.success) throw new Error("The bridge returned an unusable changes summary.");
+  return result.data;
+}
+
+const plural = (count: number, one: string, many: string) => `${count >= 1000 ? "1000+" : count} ${count === 1 ? one : many}`;
+
+/**
+ * What a summary found, in plain words, one phrase per kind. Empty means
+ * nothing a closed pane could strand: a clean checkout whose commits are all
+ * pushed, a directory that is not a checkout, or a repository with no remote
+ * at all (its commits are not "unpushed" anywhere).
+ */
+export function unsavedWork(summary: ChangesSummary): string[] {
+  if (summary.kind !== "checkout") return [];
+  const { uncommitted, untracked, unpushed } = summary.counts;
+  const found: string[] = [];
+  if (uncommitted) found.push(plural(uncommitted, "uncommitted file", "uncommitted files"));
+  if (untracked) found.push(plural(untracked, "untracked file", "untracked files"));
+  if (unpushed) {
+    found.push(summary.unpushedBasis === "detached" ? plural(unpushed, "commit not on any branch", "commits not on any branch") : plural(unpushed, "commit not pushed", "commits not pushed"));
+  }
+  return found;
+}
+
 export type DiffLine =
   | { kind: "add" | "del" | "ctx"; text: string; number: number }
   | { kind: "note"; text: string };
