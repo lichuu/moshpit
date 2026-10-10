@@ -10,7 +10,7 @@ import {
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { ChangesSheet } from "@/components/moshpit/changes-sheet";
 import { ConfirmClose } from "@/components/moshpit/confirm-close";
 import { ContextBadge } from "@/components/moshpit/context-meter";
@@ -265,6 +265,17 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
   const [shellAttempt, setShellAttempt] = useBoundAction<ShellAttempt>(shown);
   const [viewingChanges, setViewingChanges] = useBoundAction<ActionTarget>(shown);
   const changesReturn = useRef<HTMLElement | null>(null);
+  // The composer is memoised, so the way into the sheet it offers keeps one
+  // identity and reads the pane on screen when it is called.
+  const shownNow = useRef(shown);
+  shownNow.current = shown;
+  const openChanges = useCallback(
+    (returnTo: HTMLElement | null) => {
+      changesReturn.current = returnTo;
+      if (shownNow.current) setViewingChanges(shownNow.current);
+    },
+    [setViewingChanges],
+  );
   const renameSettled = useRef(false);
   const closeTrigger = useRef<HTMLButtonElement | null>(null);
 
@@ -501,11 +512,11 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
       </header>
 
       {detailView === "terminal" ? (
-        <Terminal />
+        <Terminal onOpenChanges={openChanges} />
       ) : detailView === "links" ? (
         <TerminalLinks />
       ) : (
-        <Steer view={detailView} />
+        <Steer view={detailView} onOpenChanges={openChanges} />
       )}
 
       <ChangesSheet

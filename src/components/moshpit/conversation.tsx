@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import ChatMarkdown from "./chat-markdown";
 import { isLongMessage } from "@/lib/moshpit/chat";
+import { parseReviewComments } from "@/lib/moshpit/review-comments";
+import { ReviewPill } from "./review-pill";
 import type { Question, SessionEntry } from "@/lib/moshpit/session-protocol";
 import type { AnswerCallback, BlockedDialog } from "@/lib/moshpit/types";
 
@@ -20,6 +22,8 @@ type Anchor = { entryId: string; offset: number };
 // and single activities, that differ from the default: closed unless failed.
 // `open` also holds long user messages by entry ID, closed by default.
 type Reading = { top: number; following: boolean; applying: boolean; intent: boolean; anchor: Anchor | null; open: Map<string, boolean>; nested: Map<string, boolean> };
+// A pill for a message's review comments is opened under its own key beside the message's.
+const reviewPrefix = "review:";
 const readings = new Map<string, Reading>();
 const freshReading = (): Reading => ({ top: 0, following: true, applying: false, intent: false, anchor: null, open: new Map(), nested: new Map() });
 
@@ -352,8 +356,10 @@ function ClampedText({ text, collapsed, id }: { text: string; collapsed: boolean
   return <div ref={box} id={id} data-collapsed={collapsed} className="message-clamp"><ChatMarkdown text={text} /></div>;
 }
 
-function UserMessage({ text, expanded, forced, onToggle, onCopy }: {
+function UserMessage({ text, expanded, forced, onToggle, onCopy, after }: {
   text: string; expanded: boolean; forced: boolean; onToggle: (open: boolean) => void; onCopy: () => void;
+  /** Below the buttons: the clamp's own CSS finds its toggle as the very next sibling, so nothing goes between. */
+  after?: React.ReactNode;
 }) {
   const textId = useId();
   const copy = <button type="button" aria-label="Copy message" onClick={onCopy} className="flex h-8 items-center gap-1 text-xs text-subtle"><Copy className="size-3" /> Copy</button>;
@@ -367,6 +373,7 @@ function UserMessage({ text, expanded, forced, onToggle, onCopy }: {
       </button>}
       {copy}
     </div>
+    {after}
   </>;
 }
 
@@ -450,7 +457,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
   if (seenEpoch.current !== epoch) {
     seenEpoch.current = epoch;
     const ids = new Set(entries.map((entry) => entry.id));
-    for (const map of [normal.current.open, normal.current.nested]) for (const id of map.keys()) if (!ids.has(id)) map.delete(id);
+    for (const map of [normal.current.open, normal.current.nested]) for (const id of map.keys()) if (!ids.has(id.startsWith(reviewPrefix) ? id.slice(reviewPrefix.length) : id)) map.delete(id);
   }
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -548,14 +555,20 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
             {workingLine}
             <ActivityGroup id={group.id} activities={group.activities} search={false} reading={normal.current} onCopy={(a) => void copy(entryText(a))} />
           </Fragment>;
+          // Review comments at the end of a user's message are a pill; the
+          // rest of the message is read, collapsed and searched as before.
+          const reviewed = entry?.kind === "message" && entry.role === "user" ? parseReviewComments(entry.text) : null;
+          const pillKey = `${reviewPrefix}${group.id}`;
+          const pill = reviewed ? <ReviewPill comments={reviewed.comments} expanded={normal.current.open.get(pillKey) ?? false} forced={Boolean(search)} onToggle={(open) => toggleMessage(pillKey, open)} /> : null;
           return entry?.kind === "question" ? (
             <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onUseTerminal={onUseTerminal} />
           ) : entry && "text" in entry ? (
             <article key={group.id} data-entry-id={group.id} data-role={entry.kind === "message" ? entry.role === "assistant" ? "agent" : "user" : "system"} className={entry.kind === "status" ? "text-xs text-muted" : entry.role === "user" ? "ml-auto max-w-[92%] rounded-xl bg-surface px-3 py-2" : "min-w-0 rounded-xl border border-border p-3 text-base leading-relaxed"}>
-              {entry.kind === "message" && entry.role === "user" && isLongMessage(entry.text)
-                ? <UserMessage text={entry.text} expanded={Boolean(search) || (normal.current.open.get(group.id) ?? false)} forced={Boolean(search)} onToggle={(open) => toggleMessage(group.id, open)} onCopy={() => void copy(entry.text)} />
+              {entry.kind === "message" && entry.role === "user" && isLongMessage(reviewed ? reviewed.body : entry.text)
+                ? <UserMessage text={reviewed ? reviewed.body : entry.text} expanded={Boolean(search) || (normal.current.open.get(group.id) ?? false)} forced={Boolean(search)} onToggle={(open) => toggleMessage(group.id, open)} onCopy={() => void copy(entry.text)} after={pill} />
                 : <>
-                  <ChatMarkdown text={entry.text} />
+                  {reviewed && !reviewed.body ? null : <ChatMarkdown text={reviewed ? reviewed.body : entry.text} />}
+                  {pill}
                   {entry.kind === "message" && <button type="button" aria-label="Copy message" onClick={() => void copy(entry?.text ?? "")} className="mt-1 flex h-8 items-center gap-1 text-xs text-subtle"><Copy className="size-3" /> Copy</button>}
                 </>}
             </article>

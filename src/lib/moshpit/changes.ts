@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { accessError } from "./access";
 import { headers } from "./bridge";
+import { commentPlace, type ReviewComment } from "./review-comments";
 
 // C3: what has this agent changed so far? The bridge answers from the pane's
 // own checkout; the client only ever names the pane.
@@ -59,7 +60,9 @@ export type DiffLine =
   | { kind: "add" | "del" | "ctx"; text: string; number: number }
   | { kind: "note"; text: string };
 export type DiffHunk = { header: string; lines: DiffLine[] };
-export type FileDiff = { meta: string[]; hunks: DiffHunk[]; lineCount: number };
+/** The path, line number and side a comment cites. */
+export type CommentSite = Pick<ReviewComment, "path" | "line" | "side">;
+export type FileDiff ={ meta: string[]; hunks: DiffHunk[]; lineCount: number };
 
 // Git's own header lines say nothing the file row does not: the paths, the
 // blob IDs, the old and new file names.
@@ -178,4 +181,27 @@ export function openByDefault(changes: Checkout): Set<string> {
     if (file.patch && !file.binary && (file.added ?? 0) + (file.deleted ?? 0) <= OPEN_BY_DEFAULT_LINES) open.add(file.path);
   }
   return open;
+}
+
+/**
+ * Where a comment on this line is cited (C4). A removed line is counted in the
+ * old file, so on a renamed file it cites the path from before the rename; any
+ * other line is counted in the new file.
+ */
+export function lineSite(file: ChangedFile, line: Extract<DiffLine, { number: number }>): CommentSite {
+  return line.kind === "del"
+    ? { path: file.previousPath ?? file.path, line: line.number, side: "old" }
+    : { path: file.path, line: line.number, side: "new" };
+}
+
+/** Every commentable line of the checkout's diff, as its place mapped to the file that shows it. */
+export function diffPlaces(changes: Checkout): Map<string, string> {
+  const places = new Map<string, string>();
+  for (const file of changes.files) {
+    if (!file.patch || file.binary || file.omitted) continue;
+    for (const hunk of parseFileDiff(patchOf(changes, file)).hunks) {
+      for (const line of hunk.lines) if (line.kind !== "note") places.set(commentPlace(lineSite(file, line)), file.path);
+    }
+  }
+  return places;
 }
