@@ -14,6 +14,7 @@ import { InstallApp } from "@/components/moshpit/pwa";
 import { AccessRequests, RequestAccess } from "@/components/moshpit/enrollment";
 import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
+import { armAudio, playTestCue, useAudioStatus } from "@/lib/moshpit/cues";
 import {
   listDevices,
   connectRefusal,
@@ -808,6 +809,7 @@ export function Hosts() {
   const [prefixDraft, setPrefixDraft] = useState(settings.prefix);
   const [passwordDraft, setPasswordDraft] = useState("");
   const notifyControl = pushControl(pushSetup);
+  const audio = useAudioStatus();
 
   const hostCol = (
     <>
@@ -1161,6 +1163,35 @@ export function Hosts() {
             </p>
           </div>
         ) : null}
+        <div className="rounded-xl bg-surface shadow-border">
+          <label className="flex h-14 items-center justify-between gap-3 px-3">
+            <span className="text-sm">Sound when an agent needs you</span>
+            <input
+              type="checkbox"
+              checked={settings.cueSound === true}
+              onChange={(e) => {
+                updateSettings({ cueSound: e.target.checked });
+                // The click is the gesture that lets the browser start audio.
+                if (e.target.checked) void armAudio();
+              }}
+              className="size-4 shrink-0 accent-accent"
+            />
+          </label>
+          {settings.cueSound === true ? (
+            <div className="flex items-center gap-3 px-3 pb-3">
+              <Button variant="secondary" size="sm" className="shrink-0" onClick={() => void playTestCue()}>
+                Test sound
+              </Button>
+              <p className="min-w-0 text-2xs text-subtle" role="status">
+                {audio === "ready"
+                  ? "Plays while this app is open: two soft notes when an agent blocks, one lower note when it finishes."
+                  : audio === "unsupported"
+                    ? "This browser can't play sounds."
+                    : "Sound is waiting for a tap. Tap anywhere on the page to turn it on."}
+              </p>
+            </div>
+          ) : null}
+        </div>
         <p className="px-1 text-2xs text-subtle">
           Open source. Your agents run on your machines.
         </p>

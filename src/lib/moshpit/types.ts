@@ -161,6 +161,8 @@ export type Settings = {
   notify: boolean;
   /** What a notification on this device may show; the connected host holds the same value. */
   notifyText: PushPrivacy;
+  /** A short sound, while the app is open and visible, when an agent blocks or finishes. */
+  cueSound: boolean;
   theme: ThemeId;
   autoSwitch: boolean;
 };
