@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { SquareTerminal, X } from "lucide-react";
 import { PaneSurface, type PaneHandle, type PaneStatus, type PaneTarget } from "@/components/moshpit/pane-surface";
 import { PaneStatusLabel } from "@/components/moshpit/terminal";
+import { RepeatKey } from "@/components/moshpit/repeat-key";
+import { repeats } from "@/lib/moshpit/hold-repeat";
 import { useMoreToRight } from "@/lib/moshpit/use-more-to-right";
 import { linkKey } from "@/lib/moshpit/links";
 import { draftStore, type DraftKey } from "@/lib/moshpit/drafts";
@@ -73,6 +75,11 @@ export function NativePane({ agent, host, hostUrl, interactionId, record, draftK
   const target: PaneTarget = { hostId: host.id, url: hostUrl, paneId: agent.id, nativeSessionId: record.nativeSessionId };
   const demoLines = hostUrl ? undefined : agent.lines.slice(-60).map((line) => line.text);
 
+  function press(key: string) {
+    if (!surface.current) sendKeys(agent.id, key);
+    else surface.current.send(key);
+  }
+
   function transfer(text: string) {
     const draft = draftStore(draftKey);
     const current = draft.getSnapshot().draft.text;
@@ -114,20 +121,25 @@ export function NativePane({ agent, host, hostUrl, interactionId, record, draftK
             WebkitMaskImage: "linear-gradient(to right, black calc(100% - 28px), transparent)",
           } : undefined}
         >
-          {KEYS.map(({ key, label, name }) => (
-            <button
-              key={key}
-              type="button"
-              aria-label={name}
+          {KEYS.map(({ key, label, name }) => {
+            const props = {
+              "aria-label": name,
               // Focus stays where it was, so a key never closes the keyboard
               // or takes the caret out of the composer.
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => { if (!surface.current) sendKeys(agent.id, key); else surface.current.send(key); }}
-              className="h-9 min-w-9 shrink-0 rounded-sm bg-surface-2 px-2.5 font-mono text-xs text-muted shadow-border"
-            >
-              {label}
-            </button>
-          ))}
+              onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
+              className: "h-9 min-w-9 shrink-0 rounded-sm bg-surface-2 px-2.5 font-mono text-xs text-muted shadow-border",
+            };
+            // Arrows and Backspace repeat while held; the rest send once.
+            return repeats(key) ? (
+              <RepeatKey key={key} keyName={key} send={press} handle={surface} live={status.state === "connected"} {...props}>
+                {label}
+              </RepeatKey>
+            ) : (
+              <button key={key} type="button" onClick={() => press(key)} {...props}>
+                {label}
+              </button>
+            );
+          })}
         </div>
         {focused && layout.regime !== "wide" ? (
           <button type="button" aria-label="Leave pane input" onMouseDown={(event) => event.preventDefault()} onClick={() => surface.current?.blur()} className="h-9 shrink-0 rounded-sm px-2.5 text-xs font-medium text-muted shadow-border">
