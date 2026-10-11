@@ -59,5 +59,5 @@ export async function submitNative({ run, bin, target, text, mode, agent }) {
     return { state: "delivered", message: "Typed into the terminal. Use Enter or Esc from the keypad to submit or cancel." };
   }
   await run(bin, ["pane", "send-keys", String(target), mode === "queue" ? "alt+enter" : "enter"]);
-  return { state: "delivered", message: mode === "queue" ? "Follow-up key delivered. Check the native queue for acceptance." : mode === "steer" ? "Steering key delivered. The agent keeps its native delivery timing." : "Message and submit key delivered to the terminal." };
+  return { state: "delivered", message: mode === "queue" ? "Follow-up key delivered. Check the native queue for acceptance." : mode === "steer" ? "Steering key delivered. The agent keeps its native delivery timing." : "Sent." };
 }
