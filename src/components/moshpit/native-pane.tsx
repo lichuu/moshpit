@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { SquareTerminal, X } from "lucide-react";
+import { X } from "lucide-react";
 import { PaneSurface, type PaneHandle, type PaneStatus, type PaneTarget } from "@/components/moshpit/pane-surface";
 import { PaneStatusLabel } from "@/components/moshpit/terminal";
 import { RepeatKey } from "@/components/moshpit/repeat-key";
@@ -47,7 +47,6 @@ export function NativePane({ agent, host, hostUrl, interactionId, record, draftK
 }) {
   const layout = useLayout();
   const sendKeys = useMoshpitStore((s) => s.sendKeys);
-  const setDetailView = useMoshpitStore((s) => s.setDetailView);
   const surface = useRef<PaneHandle | null>(null);
   const [status, setStatus] = useState<PaneStatus>({ state: "connecting", attempt: 0, error: null });
   const [focused, setFocused] = useState(false);
@@ -146,9 +145,6 @@ export function NativePane({ agent, host, hostUrl, interactionId, record, draftK
             Done
           </button>
         ) : null}
-        <button type="button" aria-label="Open in Terminal" title="Open the full Terminal view" onClick={() => setDetailView("terminal")} className="flex size-9 shrink-0 items-center justify-center rounded-sm text-muted shadow-border">
-          <SquareTerminal className="size-4" />
-        </button>
         <button type="button" aria-label="Close native pane" title="Hide the pane. Nothing is sent, and it keeps running." onClick={() => hideInteraction(interactionId)} className="flex size-9 shrink-0 items-center justify-center rounded-sm text-muted shadow-border">
           <X className="size-4" />
         </button>
