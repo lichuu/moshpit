@@ -89,3 +89,32 @@ test.describe("cue transitions", () => {
     expect(twoFinished).toBe("finished");
   });
 });
+
+test.describe("herdr's alert settings", () => {
+  test("a muted agent earns no cue, and the others still do", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const got = await page.evaluate(async (mod) => {
+      const { cueCandidates, cueOf } = await import(mod);
+      const prior = [{ id: "a", status: "working" }, { id: "b", status: "working" }];
+      const none = new Set<string>();
+      const off = () => false;
+      return [
+        cueCandidates(prior, [{ id: "a", status: "blocked", soundMuted: true }, { id: "b", status: "working" }], none, off),
+        cueCandidates(prior, [{ id: "a", status: "idle", soundMuted: true }, { id: "b", status: "blocked" }], none, off),
+        cueOf([{ id: "a", kind: "finished" }, { id: "b", kind: "blocked" }]),
+        cueOf([{ id: "a", kind: "finished" }]),
+        cueOf([]),
+      ];
+    }, CUES);
+    expect(got).toEqual([[], [{ id: "b", kind: "blocked" }], "blocked", "finished", null]);
+  });
+
+  test("the delay is the bridge's, bounded, and none when the bridge sends none", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const got = await page.evaluate(async (mod) => {
+      const { cueDelayMs } = await import(mod);
+      return [undefined, {}, { delaySeconds: 0 }, { delaySeconds: 1 }, { delaySeconds: 3600 }, { delaySeconds: 3601 }, { delaySeconds: -1 }, { delaySeconds: "5" }, { delaySeconds: NaN }].map(cueDelayMs);
+    }, CUES);
+    expect(got).toEqual([0, 0, 0, 1000, 3_600_000, 0, 0, 0, 0]);
+  });
+});

@@ -245,6 +245,8 @@ async function startBridge(options: BridgeOptions = {}): Promise<[Bridge, () => 
       MOSHPIT_DEV_INSECURE: "1",
       MOSHPIT_STATE_DIR: path.join(dir, "state"),
       MOSHPIT_HERDR_BIN: herdrBin,
+      // herdr's real config must not steer a test: none exists here unless a test names one.
+      HERDR_CONFIG_PATH: path.join(dir, "herdr-config.toml"),
       ...(home ? { HOME: home } : {}),
       ...options.env,
     },

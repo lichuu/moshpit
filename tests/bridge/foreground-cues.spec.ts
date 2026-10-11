@@ -203,6 +203,44 @@ test.describe("sound when an agent needs you", () => {
     expect(await notes(page), "later polls of the same block add nothing").toEqual(BLOCKED);
   });
 
+  test("waits herdr's alert delay, drops a block that clears inside it, and skips an agent herdr mutes", async ({ page, bridge }) => {
+    test.setTimeout(90_000);
+    await stubMedia(page);
+    const host = await bridge({ herdr });
+    const config = (text: string) => writeFile(path.join(host.dir, "herdr-config.toml"), text);
+    await config('[ui.toast]\ndelay_seconds = 8\n\n[ui.sound.agents]\nclaude = "off"\n');
+    await setStatuses(host, "working", "working");
+    const first = page.waitForResponse((r) => r.url().endsWith("/api/snapshot") && r.ok());
+    await open(page, host);
+    const snapshot = await (await first).json();
+    expect(snapshot.alerts).toEqual({ delaySeconds: 8 });
+    expect(snapshot.agents.map((a: { soundMuted?: boolean }) => a.soundMuted ?? false)).toEqual([false, true]);
+    await turnOn(page);
+
+    // Blocked for less than the delay: nothing, then or later.
+    await setStatuses(host, "blocked", "working");
+    await page.waitForTimeout(3_000);
+    await setStatuses(host, "working", "working");
+    await page.waitForTimeout(9_000);
+    expect(await notes(page), "a block that cleared inside the delay").toEqual([]);
+
+    // The muted agent blocks and stays blocked: still nothing.
+    await config('[ui.toast]\ndelay_seconds = 0\n\n[ui.sound.agents]\nclaude = "off"\n');
+    await setStatuses(host, "working", "blocked");
+    await settle(page);
+    expect(await notes(page), "herdr mutes this agent").toEqual([]);
+
+    // A block that outlasts the delay plays once, and not before the delay.
+    await config("[ui.toast]\ndelay_seconds = 4\n");
+    await page.waitForTimeout(2_500);
+    const at = Date.now();
+    await setStatuses(host, "blocked", "blocked");
+    await expect.poll(() => notes(page), { timeout: 20_000 }).toEqual(BLOCKED);
+    expect(Date.now() - at).toBeGreaterThanOrEqual(4_000);
+    await settle(page);
+    expect(await notes(page)).toEqual(BLOCKED);
+  });
+
   test("a hidden page plays nothing", async ({ page, bridge }) => {
     await stubMedia(page);
     const host = await bridge({ herdr });

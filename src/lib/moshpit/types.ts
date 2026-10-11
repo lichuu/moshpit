@@ -106,6 +106,8 @@ export type Agent = {
   branch: string;
   /** The branch's pull request. Absent when the bridge has none, or does not report them. */
   pullRequest?: PullRequest;
+  /** C13: herdr mutes this kind of agent, so the app's own sound skips it. */
+  soundMuted?: boolean;
   /** The pane's own terminal title, when herdr reports one. */
   title?: string;
   /** pi's current model, read from its session file, when known. */
