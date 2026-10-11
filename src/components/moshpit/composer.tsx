@@ -267,7 +267,9 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
       case "ready": {
         if (liveDiscovery.value.catalog.coverage === "unsupported") return "Command discovery is unavailable for this agent.";
         if (liveDiscovery.value.truncated) return "Commands list is truncated.";
-        if (liveDiscovery.value.catalog.coverage === "partial") return "Commands may be incomplete.";
+        // Only while a command is being typed, and not under an open list,
+        // whose header already says it.
+        if (liveDiscovery.value.catalog.coverage === "partial" && activeToken && !listVisible) return "Commands may be incomplete.";
         return null;
       }
     }

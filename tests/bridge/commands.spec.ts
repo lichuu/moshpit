@@ -409,8 +409,11 @@ esac`;
         commands: [{ name: "deploy-thing", invocation: "/deploy-thing", description: "Ship it.", origin: "home-skills" }],
         warnings: [],
       }));
+      // Said once, in the open list's header, and not again above the composer.
+      await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toHaveCount(0);
       await prompt.fill("/");
-      await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText("Commands · may be incomplete")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toHaveCount(0);
       await expect(listbox.getByRole("option", { name: /deploy-thing/ })).toHaveCount(0);
       await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
     } finally {
@@ -456,11 +459,11 @@ esac`;
       await rm(TRIGGER, { force: true });
       await retry.click();
       await expect(prompt).toHaveValue("type / anyway");
-      await expect(page.getByRole("status").filter({ hasText: "Commands may be incomplete." })).toBeVisible({ timeout: 15_000 });
-      await expect(failure).toHaveCount(0);
+      await expect(failure).toHaveCount(0, { timeout: 15_000 });
       await expect(prompt).toHaveValue("type / anyway");
       await prompt.fill("/");
       await expect(listbox).toBeVisible();
+      await expect(page.getByText("Commands · may be incomplete")).toBeVisible();
       await expect(listbox.getByRole("option", { name: /^\/model/ })).toBeVisible();
     } finally {
       await rm(work, { recursive: true, force: true });

@@ -454,7 +454,7 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
               </h2>
             )}
             <p className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted">
-              <StatusPill status={agent.status} live className="shrink-0" />
+              <StatusPill status={agent.status} className="shrink-0" />
               <AgentIcon kind={agent.kind} className="shrink-0" />
               <span className="min-w-0 truncate [text-wrap:nowrap]">{label.detail}</span>
               {context ? <ContextBadge context={context} /> : null}
