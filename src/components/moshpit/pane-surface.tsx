@@ -29,6 +29,11 @@ export type PaneStatus = { state: PaneState; attempt: number; error: string | nu
 export type PaneHandle = {
   /** Queues a key for this pane; false when there is no bridge to send it to. */
   send: (key: string) => boolean;
+  /**
+   * Calls back when queued keys are dropped: a request failed, the page went
+   * offline or hidden, or this surface let go of its pane. Returns the unsubscribe.
+   */
+  onDrop: (listener: () => void) => () => void;
   focus: () => void;
   blur: () => void;
 };
@@ -159,6 +164,7 @@ export function PaneSurface({ target, bindSession = false, label, demoLines, lin
   // then hands the text to the same checks and returns focus to the pane.
   const catcher = useRef<HTMLTextAreaElement | null>(null);
   const sendRef = useRef<(key: string) => boolean>(() => false);
+  const dropListeners = useRef(new Set<() => void>());
   // Callbacks change identity every wrapper render; the connection must not.
   const boundSessionId = bindSession ? target.nativeSessionId : undefined;
   const latest = useRef({ onStatus, linkKey, fallbackSend, boundSessionId });
@@ -174,6 +180,11 @@ export function PaneSurface({ target, bindSession = false, label, demoLines, lin
         if (sendRef.current(key)) return true;
         latest.current.fallbackSend(key);
         return false;
+      },
+      onDrop: (listener) => {
+        const listeners = dropListeners.current;
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
       },
       focus: () => panEl.current?.focus(),
       blur: () => panEl.current?.blur(),
@@ -239,18 +250,23 @@ export function PaneSurface({ target, bindSession = false, label, demoLines, lin
     // The socket only shows the pane; keys go over HTTP in press order.
     // Raw keys have no receipt: going offline or hidden drops the ones not
     // yet sent, and they are never replayed on return.
+    const notifyDrop = () => { for (const listener of [...dropListeners.current]) listener(); };
     const makeQueue = () => createKeyQueue(
       async (keys) => {
         const sessionId = latest.current.boundSessionId;
         await postAction(url, sessionId ? { kind: "keys", target: paneId, keys, sessionId } : { kind: "keys", target: paneId, keys });
       },
-      (error) => toast("Keys not sent", { description: error instanceof Error ? error.message : String(error) }),
+      (error) => {
+        toast("Keys not sent", { description: error instanceof Error ? error.message : String(error) });
+        notifyDrop();
+      },
     );
     let keyQueue = makeQueue();
     const dropKeys = () => {
       const dropped = keyQueue.close();
       keyQueue = makeQueue();
       if (dropped) toast("Keys not sent", { description: `${dropped} unsent ${dropped === 1 ? "key was" : "keys were"} dropped when the connection went away.` });
+      notifyDrop();
     };
     sendRef.current = (keys: string) => {
       if (disposed) return false;
@@ -393,6 +409,7 @@ export function PaneSurface({ target, bindSession = false, label, demoLines, lin
       ws?.close();
       keyQueue.close();
       sendRef.current = () => false;
+      notifyDrop();
     };
   }, [url, paneId, hostId, ready, addAgentLinks]);
 

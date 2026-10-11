@@ -12,6 +12,7 @@ const KEYS = "/src/lib/moshpit/keys.ts";
 const BRIDGE = "/src/lib/moshpit/bridge.ts";
 const ASK_KEYS = "/src/lib/moshpit/ask-keys.ts";
 const KEY_QUEUE = "/src/lib/moshpit/key-queue.ts";
+const HOLD_REPEAT = "/src/lib/moshpit/hold-repeat.ts";
 const COMMANDS = "/src/lib/moshpit/commands.ts";
 const BUILTINS = "/src/lib/moshpit/builtin-commands.ts";
 
@@ -817,5 +818,64 @@ test.describe("session context field", () => {
     expect(result.stale).toBeUndefined();
     expect(result.worst).toBe("7d window 80% · resets T");
     expect(result.noReset).toBe("5h window 62%");
+  });
+});
+
+test.describe("hold repeat", () => {
+  test("repeats only movement and erase keys, after 400 ms, 83 ms apart, to a cap of 200", async ({ page }) => {
+    await page.goto(`${DEV_URL}/`);
+    const kinds = await page.evaluate(async (mod) => {
+      const { repeats } = await import(mod);
+      const all = ["up", "down", "left", "right", "backspace", "delete", "enter", "esc", "tab", "shift+tab", "ctrl+c", "ctrl+d", "ctrl+b", "ctrl+left", "a", "\r"];
+      return Object.fromEntries(all.map((key) => [key, repeats(key)]));
+    }, HOLD_REPEAT);
+    expect(kinds).toEqual({
+      up: true, down: true, left: true, right: true, backspace: true, delete: true,
+      enter: false, esc: false, tab: false, "shift+tab": false, "ctrl+c": false, "ctrl+d": false, "ctrl+b": false, "ctrl+left": false, a: false, "\r": false,
+    });
+
+    // The module is loaded; from here the page's timers are the clock's.
+    await page.evaluate(async (mod) => {
+      const { createHoldRepeat } = await import(mod);
+      const sent: string[] = [];
+      Object.assign(window, { hold: createHoldRepeat((key: string) => sent.push(key)), sent });
+    }, HOLD_REPEAT);
+    await page.clock.install({ time: new Date() });
+    await page.clock.pauseAt(new Date(Date.now() + 10_000));
+    const run = (ms: number) => page.clock.runFor(ms);
+    const sent = () => page.evaluate(() => (window as unknown as { sent: string[] }).sent.length);
+    const call = (code: string) => page.evaluate(code);
+
+    await call('window.hold.start("up")');
+    await run(399);
+    expect(await sent()).toBe(0);
+    await run(1);
+    expect(await sent()).toBe(1);
+    await run(83);
+    expect(await sent()).toBe(2);
+    await run(82);
+    expect(await sent()).toBe(2);
+    await run(1);
+    expect(await sent()).toBe(3);
+    expect(await call("window.hold.stop()")).toBe(3);
+    await run(10_000);
+    expect(await sent()).toBe(3);
+
+    // Released before the delay: nothing was sent, so it was a tap.
+    await call('window.hold.start("up")');
+    await run(399);
+    expect(await call("window.hold.stop()")).toBe(0);
+    await run(10_000);
+    expect(await sent()).toBe(3);
+
+    // A hold stops at the cap, counts exactly that many, and a new one starts over.
+    await call('window.hold.start("left")');
+    await run(400 + 83 * 1000);
+    expect(await sent()).toBe(3 + 200);
+    expect(await call("window.hold.stop()")).toBe(200);
+    await call('window.hold.start("left")');
+    await run(400);
+    expect(await sent()).toBe(3 + 201);
+    await call("window.hold.stop()");
   });
 });

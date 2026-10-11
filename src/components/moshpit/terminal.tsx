@@ -4,8 +4,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Composer } from "@/components/moshpit/composer";
 import { PaneSurface, type PaneHandle, type PaneStatus, type PaneTarget } from "@/components/moshpit/pane-surface";
+import { RepeatKey } from "@/components/moshpit/repeat-key";
 import { extractLinks, linkKey } from "@/lib/moshpit/links";
 import { bridgeUrl } from "@/lib/moshpit/bridge";
+import { repeats } from "@/lib/moshpit/hold-repeat";
 import { projectOf } from "@/lib/moshpit/label";
 import { useLayout } from "@/lib/moshpit/use-layout";
 import { useMoshpitStore } from "@/lib/moshpit/store";
@@ -376,22 +378,33 @@ export function Terminal({ onOpenChanges }: { onOpenChanges?: (returnTo: HTMLEle
                 : undefined
             }
           >
-            {keyBar(prefix).map((k) => (
-              <button
-                key={k}
-                type="button"
-                aria-label={k === "backspace" ? "Backspace" : undefined}
+            {keyBar(prefix).map((k) => {
+              const props = {
+                "aria-label": k === "backspace" ? "Backspace" : undefined,
                 // Keep focus on the pane so the key bar never interrupts typing.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  send(k);
-                  surface.current?.focus();
-                }}
-                className="h-9 shrink-0 rounded-sm bg-surface-2 px-2.5 font-mono text-xs text-muted shadow-border"
-              >
-                {k === "backspace" ? "⌫" : k.startsWith("ctrl+") ? `^${k.slice(5).toUpperCase()}` : k}
-              </button>
-            ))}
+                onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+                className: "h-9 shrink-0 rounded-sm bg-surface-2 px-2.5 font-mono text-xs text-muted shadow-border",
+              };
+              const text = k === "backspace" ? "⌫" : k.startsWith("ctrl+") ? `^${k.slice(5).toUpperCase()}` : k;
+              // Arrows and Backspace repeat while held; the rest send once.
+              return repeats(k) ? (
+                <RepeatKey key={k} keyName={k} send={send} handle={surface} live={status.state === "connected"} onSent={() => surface.current?.focus()} {...props}>
+                  {text}
+                </RepeatKey>
+              ) : (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    send(k);
+                    surface.current?.focus();
+                  }}
+                  {...props}
+                >
+                  {text}
+                </button>
+              );
+            })}
           </div>
           {/* Touch has no Escape-to-blur: while the pane holds raw input,
               this hands the page back for scrolling, selecting or the
