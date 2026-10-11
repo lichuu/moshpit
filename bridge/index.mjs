@@ -21,6 +21,8 @@ import { createFileLimiter, createFiles, fileTarget, parseFileRequest } from "./
 import { safeJoin } from "./paths.mjs";
 import { ChangesError, changesDirectory, createChanges, parseChangesQuery } from "./changes.mjs";
 import { createPullRequests } from "./pull-requests.mjs";
+import { createHerdrAlerts } from "./herdr-alerts.mjs";
+import { createAlertDelay } from "../src/lib/moshpit/alert-delay.mjs";
 import { createSessionReader } from "./sessions.mjs";
 import { createSubmissions } from "./submissions.mjs";
 import { createBrowserBoundary, createIdentitySecurity, isApiPath } from "./security.mjs";
@@ -120,6 +122,7 @@ const diagnosticLimiter = createDiagnosticLimiter();
 const sessionReader = createSessionReader();
 const changes = createChanges();
 const pullRequests = createPullRequests();
+const herdrAlerts = createHerdrAlerts();
 // A running `gh` or read must not outlive the bridge.
 process.on("exit", () => pullRequests.close());
 const submissions = createSubmissions({
@@ -461,6 +464,10 @@ async function serveSpa(req, res, url) {
 }
 
 const observeAgents = createTransitionTracker();
+// C13: a push waits herdr's own `ui.toast.delay_seconds` and goes out only if
+// the agent is still blocked, or still finished, when the wait ends.
+const heldAlerts = createAlertDelay(({ type }, status) => (type === "block" ? status === "blocked" : status === "idle" || status === "done"));
+let recheck;
 // setInterval does not wait for the previous poll, and a slow push provider
 // can hold one for seconds, so a poll that finds another running skips.
 let polling = false;
@@ -472,7 +479,17 @@ async function pollBlocked() {
     const snap = await herdr.snapshot();
     const agents = snap.agents ?? [];
     const titles = new Map(agents.map((a) => [a.id, a.title || a.name || a.id]));
-    const newly = observeAgents(agents);
+    const { delaySeconds } = await herdrAlerts.current();
+    const newly = heldAlerts.step(observeAgents(agents), agents, delaySeconds * 1000, Date.now());
+    // A wait shorter than the poll interval is checked when it ends, not at
+    // the next poll.
+    if (heldAlerts.size && delaySeconds * 1000 < POLL_MS && !recheck) {
+      recheck = setTimeout(() => {
+        recheck = undefined;
+        pollBlocked();
+      }, delaySeconds * 1000 + 50);
+      recheck.unref();
+    }
     if (!newly.length || !PUSH.available) return;
     await deliverPush(
       newly.map(({ id, type }) => ({
@@ -627,7 +644,10 @@ const server = createServer(async (req, res) => {
       const agents = await Promise.all(snapshot.agents.map(async (agent) => ({ ...agent, lastMessageAt: await sessionReader.lastMessageAt(agent) })));
       // C9: whatever pull-request status is cached, added without waiting. This
       // read is also what tells the worker that someone is looking.
-      json(res, 200, { ...snapshot, agents: pullRequests.annotate(agents) });
+      // C13: herdr's alert settings ride along, so the app's sound waits the
+      // same delay and skips the agents herdr mutes.
+      const alerts = await herdrAlerts.current();
+      json(res, 200, { ...snapshot, alerts: { delaySeconds: alerts.delaySeconds }, agents: herdrAlerts.annotate(pullRequests.annotate(agents), alerts) });
       return;
     }
     if (req.method === "GET" && pathname === "/api/agent-detail") {

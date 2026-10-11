@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { toast } from "sonner";
 import { CURRENT_RELEASE } from "@/lib/moshpit/releases";
 import { inboxUnread, makeEvent, newId } from "./events";
-import { cueTransition, openBlockedIds, playCue } from "./cues";
+import { cueCandidates, cueDelayMs, cueOf, heldCues, openBlockedIds, playCue } from "./cues";
 import { WIDE_MIN_PX } from "./layout";
 import { encodeImage, fetchSnapshot, fetchRequesterLogin, inspectPushSupport, consumePairing, discoverAccess, checkDeviceCredential, postAction, postLogin, postLogout, registerPush, updatePushSubscription, type KeyInput, type Snapshot, connectRefusal, diagnoseBridge, unregisterPush } from "./bridge";
 import { mergeLinks, pruneStaleLinks, splitLinkKey } from "./links";
@@ -1892,10 +1892,18 @@ export const useMoshpitStore = create<MoshpitState>()(
               // The first snapshot of a connection, and the first after the
               // poll had failed, only set the baseline: every blocked agent
               // would otherwise "become" blocked at once.
-              const cue =
-                s.snapshotHostId === host.id && !s.connectError
-                  ? cueTransition(s.agents, snap.agents, openBlockedIds(s.events), (id) => agentOnScreen(s, id))
-                  : null;
+              const settled = s.snapshotHostId === host.id && !s.connectError;
+              if (!settled) heldCues.clear();
+              const cue = cueOf(
+                heldCues.step(
+                  settled
+                    ? cueCandidates(s.agents, snap.agents, openBlockedIds(s.events), (id) => agentOnScreen(s, id))
+                    : [],
+                  snap.agents,
+                  cueDelayMs(snap.alerts),
+                  Date.now(),
+                ),
+              );
               const next = applySnapshot(s, snap);
               set({
                 ...next,

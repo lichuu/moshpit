@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { createAlertDelay } from "./alert-delay.mjs";
 import type { Agent } from "./types";
 
 // C8: an optional sound while the app is open and looking at the host. Two
@@ -16,33 +17,63 @@ export function openBlockedIds(events: { agentId: string; kind: string; resolved
   );
 }
 
+export type CueCandidate = { id: string; kind: CueKind };
+
 /**
- * The cue a snapshot earns. `prior` is the agents from the last snapshot of
- * this host, or null when this one is the first (connect, reconnect), which is
- * never a transition. A block is new when the agent was not blocked and has no
- * open Inbox row, so it agrees with the row `applySnapshot` opens for it; a
- * finish is working to idle or done, the rule the live poll writes its "turn"
- * rows by. Blocked outranks finished, and several of either are one cue.
+ * The cues a snapshot earns, one per agent. `prior` is the agents from the
+ * last snapshot of this host, or null when this one is the first (connect,
+ * reconnect), which is never a transition. A block is new when the agent was
+ * not blocked and has no open Inbox row, so it agrees with the row
+ * `applySnapshot` opens for it; a finish is working to idle or done, the rule
+ * the live poll writes its "turn" rows by. An agent herdr mutes earns none.
  */
+export function cueCandidates(
+  prior: Pick<Agent, "id" | "status">[] | null,
+  agents: Pick<Agent, "id" | "status" | "soundMuted">[],
+  openBlocked: Set<string>,
+  onScreen: (agentId: string) => boolean,
+): CueCandidate[] {
+  if (!prior) return [];
+  const was = new Map(prior.map((a) => [a.id, a.status]));
+  const found: CueCandidate[] = [];
+  for (const a of agents) {
+    if (a.soundMuted) continue;
+    if (a.status === "blocked" && was.get(a.id) !== "blocked" && !openBlocked.has(a.id))
+      found.push({ id: a.id, kind: "blocked" });
+    else if (was.get(a.id) === "working" && (a.status === "idle" || a.status === "done") && !onScreen(a.id))
+      found.push({ id: a.id, kind: "finished" });
+  }
+  return found;
+}
+
+/** One cue for several: blocked outranks finished, and several of either are one. */
+export function cueOf(candidates: CueCandidate[]): CueKind | null {
+  if (candidates.some((c) => c.kind === "blocked")) return "blocked";
+  return candidates.length ? "finished" : null;
+}
+
+/** The cue a snapshot earns when nothing holds it back. */
 export function cueTransition(
   prior: Pick<Agent, "id" | "status">[] | null,
-  agents: Pick<Agent, "id" | "status">[],
+  agents: Pick<Agent, "id" | "status" | "soundMuted">[],
   openBlocked: Set<string>,
   onScreen: (agentId: string) => boolean,
 ): CueKind | null {
-  if (!prior) return null;
-  const was = new Map(prior.map((a) => [a.id, a.status]));
-  const blocked = agents.some(
-    (a) => a.status === "blocked" && was.get(a.id) !== "blocked" && !openBlocked.has(a.id),
-  );
-  if (blocked) return "blocked";
-  const finished = agents.some(
-    (a) =>
-      was.get(a.id) === "working" &&
-      (a.status === "idle" || a.status === "done") &&
-      !onScreen(a.id),
-  );
-  return finished ? "finished" : null;
+  return cueOf(cueCandidates(prior, agents, openBlocked, onScreen));
+}
+
+/**
+ * C13: cues wait herdr's alert delay and play only if the agent is still in
+ * the state that earned them, the rule the bridge holds push by.
+ */
+export const heldCues = createAlertDelay<CueCandidate>((cue, status) =>
+  cue.kind === "blocked" ? status === "blocked" : status === "idle" || status === "done",
+);
+
+/** The delay a snapshot carries, in ms. A bridge that sends none means no wait. */
+export function cueDelayMs(alerts: { delaySeconds?: unknown } | undefined) {
+  const seconds = alerts?.delaySeconds;
+  return typeof seconds === "number" && seconds >= 0 && seconds <= 3600 ? seconds * 1000 : 0;
 }
 
 /** At most one cue in this long, however many snapshots earn one. */

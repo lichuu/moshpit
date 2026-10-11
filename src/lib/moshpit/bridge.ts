@@ -39,6 +39,8 @@ export type Snapshot = {
   panes: { id: string; agentId: string }[];
   shells?: Shell[];
   kinds?: string[];
+  /** C13: herdr's own alert delay, read by the bridge. */
+  alerts?: { delaySeconds?: number };
 };
 
 /**
