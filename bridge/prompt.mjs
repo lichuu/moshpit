@@ -189,12 +189,219 @@ function inspectClaude(lines) {
   };
 }
 
+const MULTI_FAMILY = "claude-ask-user-multiselect-v1";
+const MULTI_FOOTER = /^enter to select · ↑\/↓ to navigate · esc to cancel$/iu;
+const MULTI_TAB = /^←\s+([☐☒])\s+(\S+)\s+✔\s+Submit\s+→$/u;
+const MULTI_CHECK = /^\s*(❯)?\s*(\d+)\.\s+\[( |✔)\](?:\s+(\S.*?))?\s*$/u;
+const MULTI_CHAT = /^\s*(❯)?\s*(\d+)\.\s+Chat about this\s*$/u;
+const MULTI_DESC = /^(\s{2,}\S.*?)\s*$/u;
+const MULTI_REVIEW_Q = /^●\s+(\S.*?)\s*$/u;
+const MULTI_REVIEW_A = /^→\s+(\S.*?)\s*$/u;
+const MULTI_SUBMIT = /^\s*(❯)?\s*(\d+)\.\s+Submit answers\s*$/u;
+const MULTI_CANCEL = /^\s*(❯)?\s*(\d+)\.\s+Cancel\s*$/u;
+
+function dialogSignature(parts) {
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
+}
+
+function lastContent(lines) {
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  return lines.slice(0, end);
+}
+
+function inspectClaudeMultiSelect(lines) {
+  const card = lastContent(lines);
+  if (!MULTI_FOOTER.test(compact(card.at(-1) ?? ""))) return null;
+  let tabAt = -1;
+  let tabs = 0;
+  for (let i = 0; i < card.length; i++) {
+    if (MULTI_TAB.test(card[i].trim())) {
+      tabs++;
+      tabAt = i;
+    }
+  }
+  if (tabs !== 1) return null;
+  const tab = MULTI_TAB.exec(card[tabAt].trim());
+  if (!tab) return null;
+  const rows = [];
+  let chat = null;
+  let questionLines = [];
+  let started = false;
+  for (let i = tabAt + 1; i < card.length - 1; i++) {
+    const line = card[i];
+    if (!line.trim()) {
+      if (!started) continue;
+      continue;
+    }
+    const check = MULTI_CHECK.exec(line);
+    if (check) {
+      started = true;
+      rows.push({
+        pointer: Boolean(check[1]),
+        key: check[2],
+        checked: check[3] === "✔",
+        label: check[4] ?? "",
+        description: "",
+      });
+      continue;
+    }
+    const chatRow = MULTI_CHAT.exec(line);
+    if (chatRow && started) {
+      chat = { pointer: Boolean(chatRow[1]), key: chatRow[2] };
+      continue;
+    }
+    if (started && rows.length && MULTI_DESC.test(line) && !line.includes("❯")) {
+      rows.at(-1).description = compact(`${rows.at(-1).description} ${line}`);
+      continue;
+    }
+    if (started) return null;
+    questionLines.push(line.trim());
+  }
+  const options = rows.filter((row) => row.label !== "Type something");
+  const other = rows.find((row) => row.label === "Type something");
+  if (options.length !== 2 || !other || other.checked || other.pointer || !chat || chat.pointer) return null;
+  if (rows.length !== 3) return null;
+  const keys = [...options.map((row) => row.key), other.key, chat.key];
+  if (keys.some((key, index) => key !== String(index + 1))) return null;
+  if (options.some((row) => !row.label)) return null;
+  const pointed = options.filter((row) => row.pointer);
+  if (pointed.length !== 1) return null;
+  const question = compact(questionLines.join(" "));
+  if (!question || !question.includes("?")) return null;
+  const header = tab[2];
+  const answers = options.filter((row) => row.checked).map((row) => row.label);
+  const questionId = question;
+  return {
+    kind: "questions",
+    family: MULTI_FAMILY,
+    phase: "select",
+    questions: [{
+      id: questionId,
+      header,
+      question,
+      multiSelect: true,
+      options: options.map((row) => ({
+        key: row.key,
+        label: row.label,
+        description: row.description,
+        checked: row.checked,
+      })),
+      other: { key: other.key, label: other.label, text: "", multiline: false },
+    }],
+    answers: { [questionId]: answers },
+    focus: { kind: "option", key: pointed[0].key },
+    actions: ["toggle", "review"],
+    signature: dialogSignature([
+      MULTI_FAMILY,
+      "select",
+      header,
+      question,
+      ...options.map((row) => `${row.key}|${row.label}|${row.checked ? "1" : "0"}|${row.description}`),
+      `other|${other.key}`,
+      `focus|${pointed[0].key}`,
+    ]),
+  };
+}
+
+function inspectClaudeMultiReview(lines) {
+  const card = lastContent(lines);
+  if (!MULTI_CANCEL.test(card.at(-1) ?? "")) return null;
+  const submit = MULTI_SUBMIT.exec(card.at(-2) ?? "");
+  const cancel = MULTI_CANCEL.exec(card.at(-1) ?? "");
+  if (!submit || !cancel) return null;
+  if (Boolean(submit[1]) === Boolean(cancel[1])) return null;
+  if (submit[2].length !== 1 || cancel[2].length !== 1) return null;
+  const title = card.findIndex((line) => line.trim() === "Review your answers");
+  const ready = card.findIndex((line) => line.trim() === "Ready to submit your answers?");
+  let tabAt = -1;
+  let tabs = 0;
+  for (let i = 0; i < card.length; i++) {
+    if (MULTI_TAB.test(card[i].trim())) {
+      tabs++;
+      tabAt = i;
+    }
+  }
+  if (tabs !== 1 || title < 0 || ready < title) return null;
+  const tab = MULTI_TAB.exec(card[tabAt].trim());
+  if (!tab || tab[1] !== "☒") return null;
+  let question = "";
+  let answerLine = "";
+  let askedCount = 0;
+  let answerCount = 0;
+  for (let i = title + 1; i < ready; i++) {
+    const line = card[i].trim();
+    if (!line) continue;
+    const asked = MULTI_REVIEW_Q.exec(line);
+    if (asked) {
+      askedCount++;
+      question = asked[1];
+      continue;
+    }
+    const answered = MULTI_REVIEW_A.exec(line);
+    if (answered) {
+      answerCount++;
+      answerLine = answered[1];
+      continue;
+    }
+    return null;
+  }
+  if (askedCount !== 1 || answerCount !== 1 || !question.includes("?") || !answerLine) return null;
+  if (card.slice(ready + 1, -2).some((line) => line.trim())) return null;
+  const labels = answerLine.split(",").map((label) => label.trim()).filter(Boolean);
+  if (!labels.length || new Set(labels).size !== labels.length) return null;
+  const questionId = question;
+  const focusKey = submit[1] ? submit[2] : cancel[2];
+  return {
+    kind: "questions",
+    family: MULTI_FAMILY,
+    phase: "review",
+    questions: [{
+      id: questionId,
+      header: tab[2],
+      question,
+      multiSelect: true,
+      options: [],
+      other: null,
+    }],
+    answers: { [questionId]: labels },
+    focus: { kind: submit[1] ? "submit" : "cancel", key: focusKey },
+    submitKey: submit[2],
+    actions: ["submit"],
+    signature: dialogSignature([
+      MULTI_FAMILY,
+      "review",
+      tab[2],
+      question,
+      labels.join("|"),
+      `submit|${submit[2]}`,
+      `cancel|${cancel[2]}`,
+      `focus|${focusKey}`,
+    ]),
+  };
+}
+
+export function planQuestionWrite(dialog, op) {
+  if (dialog?.family !== MULTI_FAMILY || !op || typeof op !== "object") return null;
+  if (op.op === "toggle" && dialog.phase === "select" && dialog.actions.includes("toggle")) {
+    const question = dialog.questions.find((item) => item.id === op.questionId);
+    const option = question?.options.find((item) => item.key === op.optionKey);
+    if (!question || !option || option.key.length !== 1) return null;
+    return { key: option.key };
+  }
+  if (op.op === "review" && dialog.phase === "select" && dialog.actions.includes("review")) return { key: "right" };
+  if (op.op === "submit" && dialog.phase === "review" && dialog.actions.includes("submit") && typeof dialog.submitKey === "string" && dialog.submitKey.length === 1) {
+    return { key: dialog.submitKey };
+  }
+  return null;
+}
+
 export function inspectAnswerDialog(kind, dump) {
   const raw = String(dump ?? "");
   if ((kind === "claude" || kind === "claude-code") && Buffer.byteLength(raw, "utf8") <= 32 * 1024) {
     const lines = normalize(raw);
     if (lines.length <= 128) {
-      const inspected = inspectClaudeReview(lines) ?? inspectClaude(lines);
+      const inspected = inspectClaudeMultiReview(lines) ?? inspectClaudeMultiSelect(lines) ?? inspectClaudeReview(lines) ?? inspectClaude(lines);
       if (inspected) return inspected;
     }
   }

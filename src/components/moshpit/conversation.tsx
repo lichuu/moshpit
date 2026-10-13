@@ -7,7 +7,10 @@ import { isLongMessage } from "@/lib/moshpit/chat";
 import { parseReviewComments } from "@/lib/moshpit/review-comments";
 import { ReviewPill } from "./review-pill";
 import type { Question, SessionEntry } from "@/lib/moshpit/session-protocol";
-import type { AnswerCallback, BlockedDialog } from "@/lib/moshpit/types";
+import { questionControls, type QuestionControlModel } from "@/lib/moshpit/question-controls.mjs";
+import type { AnswerCallback, BlockedDialog, QuestionStep } from "@/lib/moshpit/types";
+
+const compactText = (text: string) => text.replace(/\s+/gu, " ").trim();
 
 type Anchor = { entryId: string; offset: number };
 // Only the reader decides whether to follow the bottom. A scroll event also
@@ -152,11 +155,99 @@ function activitySummary(activities: ActivityEntry[]) {
   return failed ? `${text} · ${failed} failed` : text;
 }
 
-function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
+function QuestionStepList({ model, onQuestion, onUseTerminal }: {
+  model: QuestionControlModel;
+  onQuestion: (step: QuestionStep, onOutcome?: AnswerCallback) => void;
+  onUseTerminal?: () => void;
+}) {
+  const [lockedToken, setLockedToken] = useState<string | null>(null);
+  const attempt = useRef(0);
+  useEffect(() => {
+    setLockedToken((current) => current && current !== model.token ? null : current);
+  }, [model.token]);
+  const locked = lockedToken === model.token;
+  return (
+    <div className="mt-2 space-y-2" data-role="question-controls">
+      {model.phase === "review" && model.answers?.length ? (
+        <p className="text-sm text-muted">Selected: {model.answers.join(", ")}</p>
+      ) : null}
+      {model.controls.map((control) => {
+        const step: QuestionStep = control.op === "toggle"
+          ? { op: "toggle", questionId: control.questionId, optionKey: control.optionKey }
+          : { op: control.op };
+        const name = control.op === "toggle"
+          ? `${control.checked ? "Selected" : "Not selected"}: ${control.label}`
+          : control.label;
+        return (
+          <button
+            key={control.op === "toggle" ? control.optionKey : control.op}
+            type="button"
+            aria-label={name}
+            aria-pressed={control.op === "toggle" ? control.checked : undefined}
+            disabled={locked}
+            onClick={() => {
+              const n = ++attempt.current;
+              const token = model.token;
+              setLockedToken(token);
+              onQuestion(step, (outcome) => {
+                if (outcome.state !== "failed" || attempt.current !== n) return;
+                setLockedToken((current) => current === token ? null : current);
+              });
+            }}
+            className={cn(
+              "flex min-h-11 w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm tap-scale",
+              control.op === "toggle" && control.checked ? "border-working/60 bg-working/10" : "border-border",
+              locked ? "opacity-70" : undefined,
+            )}
+          >
+            {control.op === "toggle" ? (
+              <span className="shrink-0 rounded-md border border-border px-1.5 font-mono text-xs text-subtle">{control.optionKey}</span>
+            ) : null}
+            <span className="min-w-0 flex-1 break-words">
+              {control.label}
+              {control.op === "toggle" && control.description ? <span className="mt-0.5 block text-xs text-subtle">{control.description}</span> : null}
+            </span>
+            {control.op === "toggle" ? <span className="text-subtle">{control.checked ? "☑" : "☐"}</span> : null}
+          </button>
+        );
+      })}
+      {onUseTerminal ? (
+        <button type="button" onClick={onUseTerminal} className="flex h-11 w-full items-center justify-center rounded-lg border border-border text-sm font-medium tap-scale">
+          Answer in Terminal
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function LiveQuestion({ dialog, entries, onQuestion, onUseTerminal }: {
+  dialog?: BlockedDialog;
+  entries: SessionEntry[];
+  onQuestion?: (step: QuestionStep, onOutcome?: AnswerCallback) => void;
+  onUseTerminal?: () => void;
+}) {
+  const model = onQuestion ? questionControls(dialog) : null;
+  if (!model || !onQuestion) return null;
+  const asked = compactText(model.question);
+  const covered = entries.some((entry) =>
+    entry.kind === "question" && !entry.resolved && entry.questions.some((question) => question.multi && compactText(question.text) === asked),
+  );
+  if (covered) return null;
+  return (
+    <article data-role="question" className="min-w-0 rounded-xl border border-working/40 bg-surface/60 p-3">
+      <p className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-working">Question · waiting on you</p>
+      <p className="break-words text-sm font-medium">{model.question}</p>
+      <QuestionStepList model={model} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
+    </article>
+  );
+}
+
+function QuestionCard({ entry, dialog, blocked, onAnswer, onQuestion, onUseTerminal }: {
   entry: QuestionEntry;
   dialog?: BlockedDialog;
   blocked?: boolean;
   onAnswer?: (question: Question, optionIndex: number, printedKey?: string, onOutcome?: AnswerCallback) => void;
+  onQuestion?: (step: QuestionStep, onOutcome?: AnswerCallback) => void;
   onUseTerminal?: () => void;
 }) {
   const [sent, setSent] = useState<{ token: string | null; id: string; attempt: number } | null>(null);
@@ -168,7 +259,10 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
   // the agent's own printed keys, so its matching question stays tappable
   // even in a multi-question card; the printed key is shown on the row.
   const choose = dialog?.kind === "choose" ? dialog : undefined;
-  const compact = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const controls = onQuestion ? questionControls(dialog) : null;
+  const compact = compactText;
+  const controlled = (question: Question) =>
+    Boolean(controls && question.multi && compact(question.text) === compact(controls.question));
   const matches = (question: Question) => choose && compact(choose.question) === compact(question.text);
   const live = (question: Question) =>
     choose && !entry.resolved && !question.multi && matches(question) && entry.questions.filter(matches).length === 1 ? choose : undefined;
@@ -205,6 +299,7 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
     ? entry.questions.find((question) => live(question))
     : undefined;
   const needsTerminal =
+    !entry.questions.some(controlled) &&
     !entry.resolved &&
     !cardLocked && choose?.family !== "claude-ask-user-review-v1" &&
     (choose
@@ -247,7 +342,9 @@ function QuestionCard({ entry, dialog, blocked, onAnswer, onUseTerminal }: {
         return (
           <div key={questionIndex} className={cn(questionIndex ? "mt-3 border-t border-border pt-3" : "", canAnswer && !answerable && "opacity-70")}>
             <p className="break-words text-sm font-medium">{question.text}</p>
-            {question.multi ? (
+            {question.multi && controls && onQuestion && controlled(question) ? (
+              <QuestionStepList model={controls} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
+            ) : question.multi ? (
               <div className="mt-2 space-y-1">
                 {question.options.map((option) => (
                   <p key={option.label} className="flex items-baseline gap-2 break-words text-sm text-muted">
@@ -422,13 +519,15 @@ function ActivityGroup({ id, activities, search, reading, onCopy }: {
   </details>;
 }
 
-export function Conversation({ sessionId, epoch = 0, entries, working, before, loadOlder, loadingOlder, dialog, blocked, onAnswer, onUseTerminal, nativePane }: {
+export function Conversation({ sessionId, epoch = 0, entries, working, before, loadOlder, loadingOlder, dialog, blocked, onAnswer, onQuestion, onUseTerminal, nativePane }: {
   /** The toggle for the agent's live pane shown inside Chat. */
   nativePane?: { open: boolean; onToggle: () => void };
   sessionId: string; epoch?: number; entries: SessionEntry[]; working: boolean; before: string | null; loadOlder: () => void; loadingOlder: boolean;
   dialog?: BlockedDialog;
   blocked?: boolean;
-  onAnswer?: (question: Question, optionIndex: number, printedKey?: string, onOutcome?: AnswerCallback) => void; onUseTerminal?: () => void;
+  onAnswer?: (question: Question, optionIndex: number, printedKey?: string, onOutcome?: AnswerCallback) => void;
+  onQuestion?: (step: QuestionStep, onOutcome?: AnswerCallback) => void;
+  onUseTerminal?: () => void;
 }) {
   const normal = useRef(readings.get(sessionId) ?? freshReading());
   // Search owns its own coordinates and expansion: filtered results and
@@ -561,7 +660,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
           const pillKey = `${reviewPrefix}${group.id}`;
           const pill = reviewed ? <ReviewPill comments={reviewed.comments} expanded={normal.current.open.get(pillKey) ?? false} forced={Boolean(search)} onToggle={(open) => toggleMessage(pillKey, open)} /> : null;
           return entry?.kind === "question" ? (
-            <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onUseTerminal={onUseTerminal} />
+            <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
           ) : entry && "text" in entry ? (
             <article key={group.id} data-entry-id={group.id} data-role={entry.kind === "message" ? entry.role === "assistant" ? "agent" : "user" : "system"} className={entry.kind === "status" ? "text-xs text-muted" : entry.role === "user" ? "ml-auto max-w-[92%] rounded-xl bg-surface px-3 py-2" : "min-w-0 rounded-xl border border-border p-3 text-base leading-relaxed"}>
               {entry.kind === "message" && entry.role === "user" && isLongMessage(reviewed ? reviewed.body : entry.text)
@@ -576,6 +675,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
             <ActivityGroup key={group.id} id={group.id} activities={group.activities} search={Boolean(search)} reading={normal.current} onCopy={(a) => void copy(entryText(a))} />
           );
         })}
+        <LiveQuestion dialog={dialog} entries={entries} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
         {search && !visible.length && <p className="text-sm text-muted">No matches in loaded history.</p>}
         {showWorking && trailing < 0 && workingLine}
       </div>

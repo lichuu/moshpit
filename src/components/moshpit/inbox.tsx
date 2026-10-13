@@ -95,7 +95,7 @@ function EventRow({
           waiting ? "text-blocked" : "text-fg/80",
         )}
       >
-        {waiting && dialog?.question ? dialog.question : event.text}
+        {waiting && (dialog?.kind === "choose" || dialog?.kind === "terminal") && dialog.question ? dialog.question : event.text}
       </p>
       {waiting ? (
         <div className="mt-3 flex flex-wrap gap-2">

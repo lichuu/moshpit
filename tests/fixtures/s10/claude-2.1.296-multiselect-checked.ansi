@@ -1,0 +1,25 @@
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/s10-capture
+
+
+❯ ask which capabilities to keep
+
+● User answered Claude's questions:
+  ⎿  · Which capabilities should the renderer keep? → Color output
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Caps  ✔ Submit  →
+
+Which capabilities should the renderer keep?
+
+❯ 1. [ ] Color output
+         Use ANSI colors in rendered output.
+  2. [✔] Nerd Font
+         Assume a Nerd Font is installed and use its glyphs.
+  3. [ ] Type something
+     Submit
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

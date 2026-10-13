@@ -7,9 +7,13 @@ export type EventKind = "blocked" | "tool" | "turn";
 export type EventResolution = "approved" | "denied" | "answered";
 /** What became of one answer a control sent, so the control can unlatch. */
 export type AnswerOutcome = {
-  state: "delivered" | "failed";
+  state: "delivered" | "failed" | "unknown";
   message: string;
 };
+export type QuestionStep =
+  | { op: "toggle"; questionId: string; optionKey: string }
+  | { op: "review" }
+  | { op: "submit" };
 export type AnswerCallback = (outcome: AnswerOutcome) => void;
 export type FilterId = "all" | "blocked" | "working" | "done";
 export type TermSize = "sm" | "md" | "lg";
@@ -149,6 +153,15 @@ export type BlockedOption = { key: string; label: string };
  * terminal view. `expected` is the token signature the bridge minted, so an
  * answer is only accepted while the same dialog step is still open.
  */
+export type DialogQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  multiSelect: boolean;
+  options: { key: string; label: string; description?: string; checked: boolean }[];
+  other: { key: string; label: string; text: string; multiline: boolean } | null;
+};
+
 export type BlockedDialog =
   | {
       kind: "choose";
@@ -158,6 +171,18 @@ export type BlockedDialog =
       question: string;
       step: { index: number; total: number } | null;
       options: { key: string; label: string; description?: string }[];
+    }
+  | {
+      kind: "questions";
+      family: string;
+      sessionId?: string;
+      expected: { token: string; signature: string; revision: number | null };
+      phase: "select" | "review";
+      questions: DialogQuestion[];
+      answers: Record<string, string[]>;
+      focus: { kind: "option" | "submit" | "cancel"; key: string };
+      actions: ("toggle" | "review" | "submit")[];
+      submitKey?: string;
     }
   | { kind: "terminal"; question: string; options: BlockedOption[]; reason?: string };
 

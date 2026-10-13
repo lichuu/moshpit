@@ -26,6 +26,7 @@ import type {
   AgentView,
   AnswerCallback,
   DemoQuestion,
+  QuestionStep,
   AgentEvent,
   AgentStatus,
   ConnectError,
@@ -231,6 +232,7 @@ type MoshpitState = {
   closeAgent: (target: string) => Promise<boolean>;
   answerAgent: (target: string, keys: KeyInput | KeyInput[], onOutcome?: AnswerCallback) => void;
   answerDialog: (target: string, token: string, optionKey: string, onOutcome?: AnswerCallback) => void;
+  answerQuestion: (target: string, token: string, question: QuestionStep, onOutcome?: AnswerCallback) => void;
   simulateBlocked: () => void;
   resetDemo: () => void;
   updateSettings: (patch: Partial<Settings>) => void;
@@ -301,14 +303,16 @@ function blockedInsertionFor(agent: Agent): BlockedInsertion {
   return {
     sessionId:
       agent.sessionId ??
-      (dialog?.kind === "choose" ? dialog.sessionId : undefined) ??
+      (dialog?.kind === "choose" || dialog?.kind === "questions" ? dialog.sessionId : undefined) ??
       null,
     dialog:
       dialog?.kind === "choose"
         ? `choose:${dialog.expected.token}`
-        : dialog?.kind === "terminal"
-          ? `terminal:${JSON.stringify([dialog.question, dialog.options])}`
-          : `prompt:${agent.blockedPrompt ?? agent.lastOutput}`,
+        : dialog?.kind === "questions"
+          ? `questions:${dialog.expected.token}`
+          : dialog?.kind === "terminal"
+            ? `terminal:${JSON.stringify([dialog.question, dialog.options])}`
+            : `prompt:${agent.blockedPrompt ?? agent.lastOutput}`,
   };
 }
 
@@ -1726,6 +1730,38 @@ export const useMoshpitStore = create<MoshpitState>()(
           };
         });
         finish("delivered", "Answer sent");
+      },
+
+      answerQuestion: (target, token, question, onOutcome) => {
+        const finish = (state: "delivered" | "failed" | "unknown", message: string) =>
+          onOutcome?.({ state, message });
+        const host = liveHost(get());
+        if (!host?.tailnetUrl) {
+          finish("failed", "That answer is no longer available.");
+          return;
+        }
+        const ready = get().hostAccess.status === "ready";
+        if (!ready) {
+          const message = "not paired";
+          toast("Bridge write failed", { description: message });
+          finish("failed", message);
+          return;
+        }
+        const url = host.tailnetUrl.replace(/\/$/, "");
+        void postAction(url, { kind: "answer", target, token, question })
+          .then(async (res) => {
+            const body: unknown = await res.json().catch(() => null);
+            const outcome = body && typeof body === "object" && "outcome" in body && body.outcome === "unknown" ? "unknown" : "delivered";
+            finish(outcome, outcome === "unknown" ? "The pane did not show that change." : "Answer sent");
+            void fetchSnapshot(url).then((snap) => {
+              if (get().connectedHostId === host.id) set(applySnapshot(get(), snap));
+            }).catch(() => {});
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            toast("Bridge write failed", { description: message });
+            finish("failed", message);
+          });
       },
 
       answerAgent: (target, keys, onOutcome) => {

@@ -193,5 +193,8 @@ export function createSubmissions({ stateDir, herdr, prepareAttachment, canonica
     answer(target, token, optionKey, authorize) {
       return inLane(target, () => herdr.answer(target, token, optionKey), authorize);
     },
+    answerQuestion(target, token, op, authorize) {
+      return inLane(target, () => herdr.answerQuestion(target, token, op), authorize);
+    },
   };
 }

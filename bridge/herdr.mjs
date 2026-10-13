@@ -3,7 +3,8 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import { open as openFile, stat as statFile } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { extractPrompt, inspectAnswerDialog } from "./prompt.mjs";
+import { setTimeout as delay } from "node:timers/promises";
+import { extractPrompt, inspectAnswerDialog, planQuestionWrite } from "./prompt.mjs";
 import { createAnswerObservations } from "./answer-observation.mjs";
 import { parseConversation } from "./conversation.mjs";
 import { createProjectResolver } from "./projects.mjs";
@@ -116,6 +117,41 @@ const now = () => Date.now();
 // Every refusal on the answer path says the same thing: which guard tripped is
 // the bridge's business, and the phone's move is the same either way.
 const GONE = "That question is no longer on screen.";
+const QUESTION_CONFIRM_READS = 8;
+const QUESTION_CONFIRM_GAP_MS = 80;
+
+function labelSet(labels) {
+  return [...(labels ?? [])].map((label) => String(label)).sort().join("\u0000");
+}
+
+function questionLanded(before, after, op) {
+  if (op.op === "submit") {
+    const id = before.questions[0]?.id;
+    if (after?.kind === "questions" && after.phase === "review" && after.questions[0]?.id === id) return false;
+    return after?.kind === "terminal" || after?.kind === "choose" || after?.kind === "questions";
+  }
+  if (after?.kind !== "questions" || after.family !== before.family) return false;
+  const id = op.op === "toggle" ? op.questionId : before.questions[0]?.id;
+  const prev = before.questions.find((item) => item.id === id);
+  const next = after.questions.find((item) => item.id === id);
+  if (!prev || !next || prev.header !== next.header) return false;
+  if (op.op === "review") {
+    return after.phase === "review" && labelSet(before.answers[id]) === labelSet(after.answers[id]);
+  }
+  if (op.op !== "toggle" || after.phase !== "select" || before.focus?.key !== after.focus?.key) return false;
+  if (prev.options.length !== next.options.length) return false;
+  let flipped = false;
+  for (let i = 0; i < prev.options.length; i++) {
+    const left = prev.options[i];
+    const right = next.options[i];
+    if (left.key !== right.key || left.label !== right.label) return false;
+    if (left.key === op.optionKey) {
+      if (right.checked === left.checked) return false;
+      flipped = true;
+    } else if (right.checked !== left.checked) return false;
+  }
+  return flipped && !next.other?.text;
+}
 
 function line(text, tone = "plain") {
   return { text, tone };
@@ -586,6 +622,9 @@ function createDemoHerdr(onLine) {
         };
       });
     },
+    async answerQuestion() {
+      throw new Error(GONE);
+    },
     async keys(target, raw) {
       // Validated like the real bridge; literal text is echoed, never pressed.
       const input = herdrInput(raw);
@@ -961,6 +1000,9 @@ function createExecHerdr(bin) {
               });
               if (observed?.kind === "choose") {
                 found = { question: observed.question, options: observed.options };
+              } else if (observed?.kind === "questions") {
+                const asked = observed.questions[0];
+                found = { question: asked?.question ?? "", options: [] };
               } else if ((a.kind === "claude" || a.kind === "claude-code") && /enter to select|review your answers|type something\.|chat about this/iu.test(text) && found) {
                 found = { ...found, options: found.options.map((option) => ({ ...option, key: "" })) };
               }
@@ -977,6 +1019,23 @@ function createExecHerdr(bin) {
                   question: observed.question,
                   step: observed.step,
                   options: observed.options,
+                };
+              } else if (observed?.kind === "questions") {
+                a.blockedDialog = {
+                  kind: "questions",
+                  family: observed.family,
+                  sessionId: observed.sessionId,
+                  expected: {
+                    token: observed.token,
+                    signature: observed.signature,
+                    revision: observed.revision,
+                  },
+                  phase: observed.phase,
+                  questions: observed.questions,
+                  answers: observed.answers,
+                  focus: observed.focus,
+                  actions: observed.actions,
+                  ...(observed.submitKey ? { submitKey: observed.submitKey } : {}),
                 };
               } else {
                 a.blockedDialog = {
@@ -1061,6 +1120,40 @@ function createExecHerdr(bin) {
       // One printable key, the existing keys path: single chars go out as
       // send-text, never Enter. A stale step or unknown key already threw.
       await this.keys(target, optionKey);
+    },
+    async answerQuestion(target, token, op) {
+      const pending = observations.peek(target);
+      if (!pending || pending.kind !== "questions" || pending.token !== token || pending.consumed) {
+        throw new Error(GONE);
+      }
+      let fresh;
+      try {
+        fresh = inspectAnswerDialog(metadata.get(target)?.kind, await readDetection(target));
+      } catch {
+        throw new Error(GONE);
+      }
+      if (fresh.kind !== "questions" || fresh.signature !== pending.signature) throw new Error(GONE);
+      const planned = planQuestionWrite(fresh, op);
+      if (!planned) throw new Error(GONE);
+      const entry = observations.consumeQuestion(target, token, fresh.signature);
+      if (!entry) throw new Error(GONE);
+      try {
+        await this.keys(target, planned.key);
+      } catch {
+        return { outcome: "unknown" };
+      }
+      const harness = metadata.get(target)?.kind;
+      for (let attempt = 0; attempt < QUESTION_CONFIRM_READS; attempt++) {
+        if (attempt) await delay(QUESTION_CONFIRM_GAP_MS);
+        let after;
+        try {
+          after = inspectAnswerDialog(harness, await readDetection(target));
+        } catch {
+          continue;
+        }
+        if (questionLanded(fresh, after, op)) return { outcome: "delivered" };
+      }
+      return { outcome: "unknown" };
     },
     async block() {
       throw new Error("block is demo-only");

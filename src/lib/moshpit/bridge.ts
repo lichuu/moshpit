@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Agent, AgentDetail, Attachment, Host, PairPush, PushPrivacy, PushSetup, Shell } from "./types";
+import type { Agent, AgentDetail, Attachment, Host, PairPush, PushPrivacy, PushSetup, QuestionStep, Shell } from "./types";
 import { BRIDGE_PROBE_MS } from "./types";
 import { breadcrumb } from "./blackbox";
 import { accessError, credentials, identityHeaders, requireReady, saveCredentials, setHostAccess } from "./access";
@@ -59,6 +59,7 @@ export type Action =
     }
   | { kind: "keys"; target: string; keys: KeyInput | KeyInput[]; sessionId?: string }
   | { kind: "answer"; target: string; token: string; optionKey: string }
+  | { kind: "answer"; target: string; token: string; question: QuestionStep }
   | { kind: "start"; cwd: string; agentKind: string; model?: string; checkout?: { baseRef: string; branch: string } }
   | { kind: "open-shell"; cwd: string }
   | { kind: "rename"; target: string; name?: string; clear?: boolean }
