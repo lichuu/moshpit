@@ -10,8 +10,13 @@
   "writes": {
     "toggle": ["pane", "send-text", "<printed digit>"],
     "review": ["pane", "send-keys", "right"],
-    "submit": ["pane", "send-text", "<printed submit digit>"]
+    "submit": ["pane", "send-text", "<printed submit digit>"],
+    "text": ["pane", "send-text", "<text>"],
+    "textThen": ["pane", "send-keys", "up", "pane", "send-keys", "right", "pane", "send-text", "<printed submit digit>"],
+    "next": ["pane", "send-keys", "right"],
+    "prev": ["pane", "send-keys", "left"]
   },
-  "revalidation": ["sessionId", "family", "signature", "revision", "phase", "focus", "checked"],
-  "confirmation": { "reads": 8, "gapMs": 80 }
+  "revalidation": ["sessionId", "family", "signature", "revision", "phase", "focus", "checked", "otherText"],
+  "confirmation": { "reads": 8, "gapMs": 80 },
+  "textVerification": { "reads": 10, "gapMs": 200 }
 }

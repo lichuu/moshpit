@@ -11,8 +11,11 @@ export type QuestionControl =
       description?: string;
       checked: boolean;
     }
+  | { op: "text"; questionId: string; label: string }
   | { op: "review"; label: "Review" }
-  | { op: "submit"; label: "Submit answers" };
+  | { op: "submit"; label: "Submit answers" }
+  | { op: "next"; label: "Next tab" }
+  | { op: "prev"; label: "Previous tab" };
 
 export type QuestionControlModel = {
   token: string;

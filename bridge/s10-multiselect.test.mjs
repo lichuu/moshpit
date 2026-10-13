@@ -80,7 +80,7 @@ test("lookalikes, partial screens, extra rows, and unprobed pointers stay out of
   assert.equal(inspectAnswerDialog("claude", SELECT.replace("❯ 1. [ ] Color output", "  1. [ ] Color output").replace("  3. [ ] Type something", "❯ 3. [ ] Type something")).kind, "terminal");
   assert.equal(inspectAnswerDialog("claude", SELECT.replace("❯ 1. [ ] Color output", "  1. [ ] Color output").replace("  4. Chat about this", "❯ 4. Chat about this")).kind, "terminal");
   assert.equal(inspectAnswerDialog("claude", SELECT.replace("  3. [ ] Type something", "❯ 3. [✔] Type something")).kind, "terminal");
-  assert.equal(inspectAnswerDialog("claude", SELECT.replace("  2. [ ] Nerd Font", "  2. [ ] Nerd Font\n  3. [ ] Extra\n         More.").replace("  3. [ ] Type something", "  4. [ ] Type something").replace("  4. Chat about this", "  5. Chat about this")).kind, "terminal");
+  assert.equal(inspectAnswerDialog("claude", SELECT.replace("  2. [ ] Nerd Font", "  2. [ ] Nerd Font\n  3. [ ] Extra\n         More.\n  4. [ ] Fourth\n         Also.\n  5. [ ] Fifth\n         Last.").replace("  3. [ ] Type something", "  6. [ ] Type something").replace("  4. Chat about this", "  7. Chat about this")).kind, "terminal");
   assert.equal(inspectAnswerDialog("claude", SELECT.replace("←  ☐ Caps  ✔ Submit  →", "←  ☐ Caps  ✔ Submit  →\n←  ☐ Width  ✔ Submit  →")).kind, "terminal");
   assert.equal(inspectAnswerDialog("claude", REVIEW.replace("   → Nerd Font", "   → Nerd Font\n ● Second question?\n   → Other")).kind, "terminal");
   assert.equal(inspectAnswerDialog("claude", movedFocus(SELECT)).kind, "questions");

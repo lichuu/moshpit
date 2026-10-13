@@ -119,6 +119,8 @@ const now = () => Date.now();
 const GONE = "That question is no longer on screen.";
 const QUESTION_CONFIRM_READS = 8;
 const QUESTION_CONFIRM_GAP_MS = 80;
+const TEXT_VERIFY_READS = 10;
+const TEXT_VERIFY_GAP_MS = 200;
 
 function labelSet(labels) {
   return [...(labels ?? [])].map((label) => String(label)).sort().join("\u0000");
@@ -132,6 +134,10 @@ function questionLanded(before, after, op) {
   }
   if (after?.kind !== "questions" || after.family !== before.family) return false;
   const id = op.op === "toggle" ? op.questionId : before.questions[0]?.id;
+  if (op.op === "next" || op.op === "prev") {
+    const headers = (dialog) => (dialog.tabs ?? []).map((tab) => tab.header).join("\u0000");
+    return after.phase === "select" && after.questions[0]?.id !== id && headers(before) !== "" && headers(before) === headers(after);
+  }
   const prev = before.questions.find((item) => item.id === id);
   const next = after.questions.find((item) => item.id === id);
   if (!prev || !next || prev.header !== next.header) return false;
@@ -151,6 +157,32 @@ function questionLanded(before, after, op) {
     } else if (right.checked !== left.checked) return false;
   }
   return flipped && !next.other?.text;
+}
+
+function sameQuestion(before, after, id) {
+  return after?.kind === "questions" && after.questions.some((item) => item.id === id && item.header === before.questions[0]?.header);
+}
+
+function textLanded(id, text, after) {
+  if (after?.kind === "terminal" || after?.kind === "choose") return true;
+  if (after?.kind !== "questions") return false;
+  if (after.phase === "review" && after.questions.some((item) => item.id === id)) return false;
+  const other = after.questions.find((item) => item.id === id)?.other;
+  if (after.phase === "select" && other?.text === text) return false;
+  return true;
+}
+
+async function readUntil(readDialog, ready) {
+  for (let attempt = 0; attempt < TEXT_VERIFY_READS; attempt++) {
+    if (attempt) await delay(TEXT_VERIFY_GAP_MS);
+    try {
+      const after = await readDialog();
+      if (ready(after)) return after;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function line(text, tone = "plain") {
@@ -901,6 +933,55 @@ function createExecHerdr(bin) {
     const stdout = await run(bin, ["worktree", "list", "--cwd", cwd], signal);
     return JSON.parse(stdout).result;
   });
+  async function answerFreeText(api, target, entry, before, text, readDialog) {
+    const id = before.questions[0]?.id;
+    try {
+      await api.keys(target, { text });
+    } catch {
+      return { outcome: "unknown" };
+    }
+    const inserted = await readUntil(readDialog, (after) =>
+      sameQuestion(before, after, id) && after.phase === "select" && after.focus?.kind === "other" && after.questions.find((item) => item.id === id)?.other?.text === text);
+    if (!inserted) return { outcome: "unknown" };
+    let snap;
+    try {
+      snap = await api.snapshot();
+    } catch {
+      return { outcome: "unknown" };
+    }
+    const agent = snap.agents?.find((item) => item.id === target);
+    if (!agent || agent.sessionId !== entry.sessionId) return { outcome: "unknown" };
+    let again;
+    try {
+      again = await readDialog();
+    } catch {
+      return { outcome: "unknown" };
+    }
+    if (again?.kind !== "questions" || again.signature !== inserted.signature) return { outcome: "unknown" };
+    try {
+      await api.keys(target, "up");
+    } catch {
+      return { outcome: "unknown" };
+    }
+    const left = await readUntil(readDialog, (after) =>
+      sameQuestion(before, after, id) && after.phase === "select" && after.focus?.kind === "option" && after.questions.find((item) => item.id === id)?.other?.text === text);
+    if (!left) return { outcome: "unknown" };
+    try {
+      await api.keys(target, "right");
+    } catch {
+      return { outcome: "unknown" };
+    }
+    const review = await readUntil(readDialog, (after) =>
+      sameQuestion(before, after, id) && after.phase === "review" && labelSet(after.answers?.[id]) === labelSet([text]) && typeof after.submitKey === "string");
+    if (!review) return { outcome: "unknown" };
+    try {
+      await api.keys(target, review.submitKey);
+    } catch {
+      return { outcome: "unknown" };
+    }
+    const done = await readUntil(readDialog, (after) => textLanded(id, text, after));
+    return { outcome: done ? "delivered" : "unknown" };
+  }
   return {
     async dump(target) {
       const pane = await terminalPane(target);
@@ -1035,6 +1116,7 @@ function createExecHerdr(bin) {
                   answers: observed.answers,
                   focus: observed.focus,
                   actions: observed.actions,
+                  tabs: observed.tabs ?? [],
                   ...(observed.submitKey ? { submitKey: observed.submitKey } : {}),
                 };
               } else {
@@ -1137,17 +1219,19 @@ function createExecHerdr(bin) {
       if (!planned) throw new Error(GONE);
       const entry = observations.consumeQuestion(target, token, fresh.signature);
       if (!entry) throw new Error(GONE);
+      const harness = metadata.get(target)?.kind;
+      const readDialog = async () => inspectAnswerDialog(harness, await readDetection(target));
+      if (planned.text) return answerFreeText(this, target, entry, fresh, planned.text, readDialog);
       try {
         await this.keys(target, planned.key);
       } catch {
         return { outcome: "unknown" };
       }
-      const harness = metadata.get(target)?.kind;
       for (let attempt = 0; attempt < QUESTION_CONFIRM_READS; attempt++) {
         if (attempt) await delay(QUESTION_CONFIRM_GAP_MS);
         let after;
         try {
-          after = inspectAnswerDialog(harness, await readDetection(target));
+          after = await readDialog();
         } catch {
           continue;
         }
