@@ -567,6 +567,85 @@ esac`,
     expect(sends).toEqual([]);
   });
 
+  test("suggestions expose names and roles, and the keyboard reaches past the fold", async ({
+    page,
+    bridge,
+  }) => {
+    const host = await bridge({
+      home: { ".claude/skills/deploy-thing/SKILL.md": skill("deploy-thing", "Ship it.") },
+      herdr: twoAgentHerdr(`echo '${snapshotBody([CLAUDE_AGENT])}'`),
+      env: { MOSHPIT_POLL_MS: "60000" },
+    });
+    await connect(page, host);
+    const sends: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/api\/(submit|action)$/.test(request.url())) sends.push(request.url());
+    });
+    const prompt = page.getByRole("textbox", { name: "Message agent" });
+    const listbox = page.getByRole("listbox", { name: "Command suggestions" });
+    await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
+    await prompt.waitFor({ state: "visible", timeout: 20_000 });
+    await expect(listbox).toHaveCount(0);
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+
+    await prompt.fill("/");
+    await expect(listbox).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(listbox.getByRole("option")).toHaveCount(22);
+    const listId = await listbox.getAttribute("id");
+    if (!listId) throw new Error("the suggestion list has no id");
+    await expect(prompt).toHaveAttribute("aria-autocomplete", "list");
+    await expect(prompt).toHaveAttribute("aria-controls", listId);
+    const first = listbox.getByRole("option", { name: "/add-dir: Add a working directory", selected: true });
+    await expect(first).toHaveCount(1);
+    const firstId = await first.getAttribute("id");
+    if (!firstId) throw new Error("the first suggestion has no id");
+    await expect(prompt).toHaveAttribute("aria-activedescendant", firstId);
+    await expect(listbox.getByRole("option", { name: "/model: Choose the model" })).toHaveCount(1);
+    await expect(listbox.getByRole("option", { name: "/deploy-thing: Ship it." })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Dismiss suggestions" })).toHaveCount(1);
+
+    const last = listbox.getByRole("option", { name: "/usage: Show plan usage limits" });
+    const outside = await last.boundingBox();
+    const fold = await listbox.boundingBox();
+    if (!fold) throw new Error("the suggestion list has no box");
+    if (!outside) throw new Error("the last suggestion has no box");
+    expect(outside.y + outside.height).toBeGreaterThan(fold.y + fold.height + 1);
+    for (let i = 0; i < 21; i += 1) await prompt.press("ArrowDown");
+    const selected = listbox.getByRole("option", { name: "/usage: Show plan usage limits", selected: true });
+    await expect(selected).toHaveCount(1);
+    const selectedId = await selected.getAttribute("id");
+    if (!selectedId) throw new Error("the reached suggestion has no id");
+    await expect(prompt).toHaveAttribute("aria-activedescendant", selectedId);
+    const reached = await selected.boundingBox();
+    const open = await listbox.boundingBox();
+    if (!reached || !open) throw new Error("the selected suggestion has no box");
+    expect(reached.y).toBeGreaterThanOrEqual(open.y - 1);
+    expect(reached.y + reached.height).toBeLessThanOrEqual(open.y + open.height + 1);
+    await prompt.press("ArrowUp");
+    await expect(listbox.getByRole("option", { name: "/status: Show version, model and account", selected: true })).toHaveCount(1);
+    await prompt.press("ArrowDown");
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue("/usage ");
+    expect(sends).toEqual([]);
+
+    await prompt.fill("/");
+    await expect(listbox).toBeVisible({ timeout: 15_000 });
+    await prompt.press("Escape");
+    await expect(listbox).toHaveCount(0);
+    await expect(prompt).toHaveValue("/");
+    await expect(prompt).toBeFocused();
+    await expect(prompt).not.toHaveAttribute("aria-autocomplete", "list");
+    expect(sends).toEqual([]);
+
+    await prompt.fill("/m");
+    await expect(listbox.getByRole("option", { name: "/compact: Summarize the conversation to free context", selected: true })).toHaveCount(1);
+    await prompt.press("Shift+Enter");
+    await expect(prompt).toHaveValue("/m\n");
+    await expect(listbox).toHaveCount(0);
+    expect(sends).toEqual([]);
+  });
+
   test("a middle-token insertion restores focus and the caret before the kept arguments", async ({
     page,
     bridge,
