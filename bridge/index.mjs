@@ -272,6 +272,18 @@ async function body(req, limit = 64 * 1024) {
   return parsed;
 }
 
+function questionStep(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (value.op === "review" || value.op === "submit") {
+    return keys.length === 1 ? { op: value.op } : null;
+  }
+  if (value.op !== "toggle" || keys.length !== 3) return null;
+  if (typeof value.questionId !== "string" || !value.questionId || value.questionId.length > 2000) return null;
+  if (typeof value.optionKey !== "string" || value.optionKey.length !== 1) return null;
+  return { op: "toggle", questionId: value.questionId, optionKey: value.optionKey };
+}
+
 // ws owns the handshake and framing. Messages over 64 KiB are closed with
 // 1009 by the library; compression is off so a small frame cannot inflate.
 const MAX_TERMINAL_MESSAGE = 64 * 1024;
@@ -951,6 +963,17 @@ const server = createServer(async (req, res) => {
       }
       else if (action.kind === "answer") {
         if (typeof action.token !== "string" || !action.token) throw new RequestError(400, "An answer token is required.");
+        const hasOption = Object.hasOwn(action, "optionKey");
+        const hasQuestion = Object.hasOwn(action, "question");
+        if (hasOption && hasQuestion) throw new RequestError(400, "An answer is either a choice or a question step.");
+        if (hasQuestion) {
+          const step = questionStep(action.question);
+          if (!step) throw new RequestError(400, "Unknown question step.");
+          const result = await submissions.answerQuestion(action.target, action.token, step, recheck);
+          await audit({ kind: "action", action: "answer", target: action.target, question: step.op });
+          json(res, 200, { ok: true, outcome: result.outcome });
+          return;
+        }
         if (typeof action.optionKey !== "string" || !action.optionKey) throw new RequestError(400, "An option key is required.");
         await submissions.answer(action.target, action.token, action.optionKey, recheck);
       }

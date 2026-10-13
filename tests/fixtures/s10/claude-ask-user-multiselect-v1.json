@@ -1,0 +1,17 @@
+{
+  "family": "claude-ask-user-multiselect-v1",
+  "harness": "claude-code",
+  "harnessVersion": "2.1.296",
+  "herdrVersion": "0.9.1",
+  "captured": "2026-10-13",
+  "pane": "120x40",
+  "source": "pane read --source detection",
+  "questionId": "question text",
+  "writes": {
+    "toggle": ["pane", "send-text", "<printed digit>"],
+    "review": ["pane", "send-keys", "right"],
+    "submit": ["pane", "send-text", "<printed submit digit>"]
+  },
+  "revalidation": ["sessionId", "family", "signature", "revision", "phase", "focus", "checked"],
+  "confirmation": { "reads": 8, "gapMs": 80 }
+}

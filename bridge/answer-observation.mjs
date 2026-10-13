@@ -32,7 +32,29 @@ export function createAnswerObservations({ randomUUID = systemRandomUUID, now = 
     if (!target) throw new TypeError("observe: `target` is required");
     const inspected = inspectAnswerDialog(harness, dump);
     let entry = targets.get(target);
-    if (inspected.kind === "choose") {
+    if (inspected.kind === "questions") {
+      const key = [sessionId, inspected.family, inspected.signature, revisionPart(revision)].join("\u0000");
+      if (!entry || entry.key !== key) {
+        entry = {
+          kind: "questions",
+          key,
+          token: randomUUID(),
+          consumed: false,
+          issuedAt: now(),
+          sessionId,
+          revision: revisionPart(revision),
+          family: inspected.family,
+          signature: inspected.signature,
+          phase: inspected.phase,
+          questions: inspected.questions,
+          answers: inspected.answers,
+          focus: inspected.focus,
+          actions: inspected.actions,
+          submitKey: inspected.submitKey ?? null,
+        };
+        targets.set(target, entry);
+      }
+    } else if (inspected.kind === "choose") {
       const key = [sessionId, inspected.family, inspected.signature, revisionPart(revision)].join("\u0000");
       if (!entry || entry.key !== key) {
         entry = {
@@ -55,13 +77,21 @@ export function createAnswerObservations({ randomUUID = systemRandomUUID, now = 
       targets.delete(target);
       entry = null;
     }
-    return inspected.kind === "choose" ? copyOf(entry) : null;
+    return inspected.kind === "choose" || inspected.kind === "questions" ? copyOf(entry) : null;
   }
 
   function consume(target, token, optionKey) {
     const entry = targets.get(target);
-    if (!entry || entry.token !== token || entry.consumed) return null;
+    if (!entry || entry.kind === "questions" || entry.token !== token || entry.consumed) return null;
     if (optionKey !== undefined && !entry.options.some((o) => o.key === optionKey)) return null;
+    entry.consumed = true;
+    return copyOf(entry);
+  }
+
+  function consumeQuestion(target, token, signature) {
+    const entry = targets.get(target);
+    if (!entry || entry.kind !== "questions" || entry.token !== token || entry.consumed) return null;
+    if (entry.signature !== signature) return null;
     entry.consumed = true;
     return copyOf(entry);
   }
@@ -79,5 +109,5 @@ export function createAnswerObservations({ randomUUID = systemRandomUUID, now = 
     targets.clear();
   }
 
-  return { observe, consume, peek, forget, reset };
+  return { observe, consume, consumeQuestion, peek, forget, reset };
 }

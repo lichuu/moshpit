@@ -94,6 +94,7 @@ export function Steer({ onOpenChanges }: { view: Exclude<AgentView, "terminal">;
   const setDetailView = useMoshpitStore((s) => s.setDetailView);
   const answerAgent = useMoshpitStore((s) => s.answerAgent);
   const answerDialog = useMoshpitStore((s) => s.answerDialog);
+  const answerQuestion = useMoshpitStore((s) => s.answerQuestion);
   const agent = agents.find((a) => a.id === selectedId) ?? agents[0];
   const host = useMoshpitStore((s) => s.hosts.find((h) => h.id === connected));
   const url = host && !host.demo && herdrRunning ? bridgeUrl(host) : "";
@@ -191,6 +192,14 @@ export function Steer({ onOpenChanges }: { view: Exclude<AgentView, "terminal">;
           loadingOlder={session.loadingOlder}
           dialog={agent.blockedDialog}
           blocked={agent.status === "blocked"}
+          onQuestion={(step, onOutcome) => {
+            const questions = agent.blockedDialog?.kind === "questions" ? agent.blockedDialog : undefined;
+            if (!questions) {
+              onOutcome?.({ state: "failed", message: "That answer is no longer available." });
+              return;
+            }
+            answerQuestion(agent.id, questions.expected.token, step, onOutcome);
+          }}
           onAnswer={(question, optionIndex, printedKey, onOutcome) => {
             const choose = agent.blockedDialog?.kind === "choose" ? agent.blockedDialog : undefined;
             // The card's own key for the row that was tapped, or nothing. The
