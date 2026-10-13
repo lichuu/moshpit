@@ -230,9 +230,19 @@ function lastContent(lines) {
   return lines.slice(0, end);
 }
 
+function multiFooter(card) {
+  const last = compact(card.at(-1) ?? "");
+  if (MULTI_FOOTER.test(last)) return { text: last, lines: 1 };
+  const joined = compact(`${card.at(-2) ?? ""} ${card.at(-1) ?? ""}`);
+  const wrapped = /^enter to select · (?:tab\/arrow keys to navigate · esc to cancel|↑\/↓ to navigate · esc to cancel|↑\/↓ to navigate · ctrl\+g to edit in vim · esc to cancel)$/iu;
+  if (wrapped.test(joined)) return { text: joined, lines: 2 };
+  return null;
+}
+
 function inspectClaudeMultiSelect(lines) {
   const card = lastContent(lines);
-  if (!MULTI_FOOTER.test(compact(card.at(-1) ?? ""))) return null;
+  const footer = multiFooter(card);
+  if (!footer) return null;
   const tabAt = card.findIndex((line) => tabList(line));
   if (tabAt < 0 || card.slice(tabAt + 1).some((line) => tabList(line))) return null;
   const tabs = tabList(card[tabAt]);
@@ -241,7 +251,7 @@ function inspectClaudeMultiSelect(lines) {
   let chat = null;
   let questionLines = [];
   let started = false;
-  for (let i = tabAt + 1; i < card.length - 1; i++) {
+  for (let i = tabAt + 1; i < card.length - footer.lines; i++) {
     const line = card[i];
     if (!line.trim()) {
       if (!started) continue;
@@ -284,7 +294,7 @@ function inspectClaudeMultiSelect(lines) {
   if (!otherText && other.label !== OTHER_EMPTY) return null;
   if (otherText && (!other.checked || otherText.includes("["))) return null;
   if (!otherText && other.checked) return null;
-  const editor = /ctrl\+g to edit in vim/iu.test(compact(card.at(-1) ?? ""));
+  const editor = /ctrl\+g to edit in vim/iu.test(footer.text);
   const optionPointers = options.filter((row) => row.pointer);
   if (editor !== other.pointer || optionPointers.length + (other.pointer ? 1 : 0) !== 1) return null;
   const question = compact(questionLines.join(" "));

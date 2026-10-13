@@ -1,0 +1,40 @@
+  one single-select question. Header: Face.
+  Question: Which face should the log use?
+  Options: Serif, Mono. Do not ask anything else
+  and do not answer it yourself.
+
+✻ Churned for 0s · done 1:26 PM
+
+❯ Ask the next question.
+
+✻ Baked for 1m 24s · done 1:30 PM
+
+❯ Ask again.
+
+✻ Cooked for 0s · done 1:39 PM
+
+❯ Ask both questions now. Do not answer them
+  yourself.
+
+✻ Cooked for 0s · done 1:49 PM
+
+❯ Ask the question now. Do not answer it
+  yourself.
+──────────────────────────────────────────────────
+←  ☐ Face  ✔ Submit  →
+
+Which faces should the log use?
+
+  1. [ ] Serif
+         A serif face.
+  2. [ ] Mono
+         A monospace face.
+  3. [ ] Slab
+         A slab face.
+❯ 4. [ ] Type something
+     Submit
+──────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · ctrl+g to edit
+in Vim · Esc to cancel
