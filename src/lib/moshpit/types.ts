@@ -14,7 +14,9 @@ export type QuestionStep =
   | { op: "toggle"; questionId: string; optionKey: string }
   | { op: "text"; questionId: string; text: string }
   | { op: "review" }
-  | { op: "submit" };
+  | { op: "submit" }
+  | { op: "next" }
+  | { op: "prev" };
 export type AnswerCallback = (outcome: AnswerOutcome) => void;
 export type FilterId = "all" | "blocked" | "working" | "done";
 export type TermSize = "sm" | "md" | "lg";
@@ -182,7 +184,8 @@ export type BlockedDialog =
       questions: DialogQuestion[];
       answers: Record<string, string[]>;
       focus: { kind: "option" | "other" | "submit" | "cancel"; key: string };
-      actions: ("toggle" | "review" | "submit" | "text")[];
+      actions: ("toggle" | "review" | "submit" | "text" | "next" | "prev")[];
+      tabs: { header: string; answered: boolean }[];
       submitKey?: string;
     }
   | { kind: "terminal"; question: string; options: BlockedOption[]; reason?: string };

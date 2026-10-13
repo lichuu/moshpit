@@ -1,0 +1,34 @@
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/s10-capture
+
+
+❯ ask which capabilities to keep
+  ⎿  Invalid tool parameters
+
+✻ Worked for 0s · done 1:07 PM
+
+❯ Use the AskUserQuestion tool once. Ask exactly one single-select question. Header: Face. Question: Which face should
+  the log use? Options: Serif, Mono. Do not ask anything else and do not answer it yourself.
+
+✻ Churned for 0s · done 1:26 PM
+
+❯ Ask the next question.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Face  ☐ Weight  ✔ Submit  →
+
+Which faces should the log use?
+
+❯ 1. [ ] Serif
+         A serif face.
+  2. [ ] Mono
+         A monospace face.
+  3. [ ] Slab
+         A slab face.
+  4. [ ] Type something
+     Next
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

@@ -190,9 +190,8 @@ function inspectClaude(lines) {
 }
 
 const MULTI_FAMILY = "claude-ask-user-multiselect-v1";
-const MULTI_FOOTER = /^enter to select · ↑\/↓ to navigate · (?:ctrl\+g to edit in vim · )?esc to cancel$/iu;
+const MULTI_FOOTER = /^enter to select · (?:↑\/↓|tab\/arrow keys) to navigate · (?:ctrl\+g to edit in vim · )?esc to cancel$/iu;
 const OTHER_EMPTY = "Type something";
-const OTHER_HINT = "Submit";
 export const QUESTION_TEXT_MAX = 64;
 
 export function questionText(value) {
@@ -201,7 +200,18 @@ export function questionText(value) {
   if (value !== value.trim() || value === OTHER_EMPTY) return null;
   return value;
 }
-const MULTI_TAB = /^←\s+([☐☒])\s+(\S+)\s+✔\s+Submit\s+→$/u;
+const MULTI_TAB_LINE = /^←((?:\s+[☐☒]\s+\S+)+)\s+✔\s+Submit\s+→$/u;
+
+function tabList(line) {
+  const match = MULTI_TAB_LINE.exec(String(line ?? "").trim());
+  if (!match) return null;
+  const tabs = [];
+  for (const part of match[1].matchAll(/([☐☒])\s+(\S+)/gu)) {
+    tabs.push({ header: part[2], answered: part[1] === "☒" });
+  }
+  if (!tabs.length || new Set(tabs.map((tab) => tab.header)).size !== tabs.length) return null;
+  return tabs;
+}
 const MULTI_CHECK = /^\s*(❯)?\s*(\d+)\.\s+\[( |✔)\](?:\s+(\S.*?))?\s*$/u;
 const MULTI_CHAT = /^\s*(❯)?\s*(\d+)\.\s+Chat about this\s*$/u;
 const MULTI_DESC = /^(\s{2,}\S.*?)\s*$/u;
@@ -223,17 +233,10 @@ function lastContent(lines) {
 function inspectClaudeMultiSelect(lines) {
   const card = lastContent(lines);
   if (!MULTI_FOOTER.test(compact(card.at(-1) ?? ""))) return null;
-  let tabAt = -1;
-  let tabs = 0;
-  for (let i = 0; i < card.length; i++) {
-    if (MULTI_TAB.test(card[i].trim())) {
-      tabs++;
-      tabAt = i;
-    }
-  }
-  if (tabs !== 1) return null;
-  const tab = MULTI_TAB.exec(card[tabAt].trim());
-  if (!tab) return null;
+  const tabAt = card.findIndex((line) => tabList(line));
+  if (tabAt < 0 || card.slice(tabAt + 1).some((line) => tabList(line))) return null;
+  const tabs = tabList(card[tabAt]);
+  if (!tabs || tabs.length > 2) return null;
   const rows = [];
   let chat = null;
   let questionLines = [];
@@ -268,11 +271,13 @@ function inspectClaudeMultiSelect(lines) {
     if (started) return null;
     questionLines.push(line.trim());
   }
-  if (!chat || chat.pointer || rows.length !== 3) return null;
+  if (!chat || chat.pointer) return null;
   const other = rows[rows.length - 1];
   const options = rows.slice(0, -1);
-  if (compact(other.description) !== OTHER_HINT) return null;
-  if (options.length !== 2 || options.some((row) => !row.label || compact(row.description) === OTHER_HINT)) return null;
+  const hint = compact(other.description);
+  if (hint !== "Submit" && hint !== "Next") return null;
+  if (hint === "Next" && tabs.length < 2) return null;
+  if (options.length < 2 || options.length > 4 || options.some((row) => !row.label || compact(row.description) === "Submit" || compact(row.description) === "Next")) return null;
   const keys = [...options.map((row) => row.key), other.key, chat.key];
   if (keys.some((key, index) => key !== String(index + 1))) return null;
   const otherText = other.label === OTHER_EMPTY ? "" : other.label;
@@ -284,14 +289,14 @@ function inspectClaudeMultiSelect(lines) {
   if (editor !== other.pointer || optionPointers.length + (other.pointer ? 1 : 0) !== 1) return null;
   const question = compact(questionLines.join(" "));
   if (!question || !question.includes("?")) return null;
-  const header = tab[2];
+  const header = hint === "Next" ? tabs[0].header : tabs.at(-1).header;
   const questionId = question;
   const focus = other.pointer
     ? { kind: "other", key: other.key }
     : { kind: "option", key: optionPointers[0].key };
   const actions = other.pointer
     ? (otherText ? [] : ["text"])
-    : ["toggle", "review"];
+    : ["toggle", ...(hint === "Next" ? ["next"] : ["review"]), ...(hint === "Submit" && tabs.length > 1 ? ["prev"] : [])];
   const answers = [
     ...options.filter((row) => row.checked).map((row) => row.label),
     ...(otherText ? [otherText] : []),
@@ -314,11 +319,14 @@ function inspectClaudeMultiSelect(lines) {
       other: { key: other.key, label: OTHER_EMPTY, text: otherText, multiline: false },
     }],
     answers: { [questionId]: answers },
+    tabs,
     focus,
     actions,
     signature: dialogSignature([
       MULTI_FAMILY,
       "select",
+      ...tabs.map((tab) => `${tab.header}|${tab.answered ? "1" : "0"}`),
+      hint,
       header,
       question,
       ...options.map((row) => `${row.key}|${row.label}|${row.checked ? "1" : "0"}|${row.description}`),
@@ -339,66 +347,58 @@ function inspectClaudeMultiReview(lines) {
   if (submit[2].length !== 1 || cancel[2].length !== 1) return null;
   const title = card.findIndex((line) => line.trim() === "Review your answers");
   const ready = card.findIndex((line) => line.trim() === "Ready to submit your answers?");
-  let tabAt = -1;
-  let tabs = 0;
-  for (let i = 0; i < card.length; i++) {
-    if (MULTI_TAB.test(card[i].trim())) {
-      tabs++;
-      tabAt = i;
-    }
-  }
-  if (tabs !== 1 || title < 0 || ready < title) return null;
-  const tab = MULTI_TAB.exec(card[tabAt].trim());
-  if (!tab || tab[1] !== "☒") return null;
-  let question = "";
-  let answerLine = "";
-  let askedCount = 0;
-  let answerCount = 0;
+  const tabAt = card.findIndex((line) => tabList(line));
+  if (tabAt < 0 || card.slice(tabAt + 1).some((line) => tabList(line)) || title < 0 || ready < title) return null;
+  const tabs = tabList(card[tabAt]);
+  if (!tabs || tabs.length > 2 || tabs.some((tab) => !tab.answered)) return null;
+  if (card.some((line) => line.includes("You have not answered all questions"))) return null;
+  const pairs = [];
+  let pending = "";
   for (let i = title + 1; i < ready; i++) {
     const line = card[i].trim();
     if (!line) continue;
     const asked = MULTI_REVIEW_Q.exec(line);
     if (asked) {
-      askedCount++;
-      question = asked[1];
+      if (pending || !asked[1].includes("?")) return null;
+      pending = asked[1];
       continue;
     }
     const answered = MULTI_REVIEW_A.exec(line);
     if (answered) {
-      answerCount++;
-      answerLine = answered[1];
+      const labels = answered[1].split(",").map((label) => label.trim()).filter(Boolean);
+      if (!pending || !labels.length || new Set(labels).size !== labels.length) return null;
+      pairs.push({ question: pending, labels });
+      pending = "";
       continue;
     }
     return null;
   }
-  if (askedCount !== 1 || answerCount !== 1 || !question.includes("?") || !answerLine) return null;
+  if (pending || pairs.length !== tabs.length) return null;
   if (card.slice(ready + 1, -2).some((line) => line.trim())) return null;
-  const labels = answerLine.split(",").map((label) => label.trim()).filter(Boolean);
-  if (!labels.length || new Set(labels).size !== labels.length) return null;
-  const questionId = question;
   const focusKey = submit[1] ? submit[2] : cancel[2];
+  const questions = pairs.map((pair, index) => ({
+    id: pair.question,
+    header: tabs.length === 1 ? tabs[0].header : tabs[index]?.header ?? "",
+    question: pair.question,
+    multiSelect: true,
+    options: [],
+    other: null,
+  }));
   return {
     kind: "questions",
     family: MULTI_FAMILY,
     phase: "review",
-    questions: [{
-      id: questionId,
-      header: tab[2],
-      question,
-      multiSelect: true,
-      options: [],
-      other: null,
-    }],
-    answers: { [questionId]: labels },
+    questions,
+    answers: Object.fromEntries(pairs.map((pair) => [pair.question, pair.labels])),
+    tabs,
     focus: { kind: submit[1] ? "submit" : "cancel", key: focusKey },
     submitKey: submit[2],
     actions: ["submit"],
     signature: dialogSignature([
       MULTI_FAMILY,
       "review",
-      tab[2],
-      question,
-      labels.join("|"),
+      ...tabs.map((tab) => `${tab.header}|1`),
+      ...pairs.map((pair) => `${pair.question}|${pair.labels.join("|")}`),
       `submit|${submit[2]}`,
       `cancel|${cancel[2]}`,
       `focus|${focusKey}`,
@@ -415,6 +415,8 @@ export function planQuestionWrite(dialog, op) {
     return { key: option.key };
   }
   if (op.op === "review" && dialog.phase === "select" && dialog.actions.includes("review")) return { key: "right" };
+  if (op.op === "next" && dialog.phase === "select" && dialog.actions.includes("next")) return { key: "right" };
+  if (op.op === "prev" && dialog.phase === "select" && dialog.actions.includes("prev")) return { key: "left" };
   if (op.op === "submit" && dialog.phase === "review" && dialog.actions.includes("submit") && typeof dialog.submitKey === "string" && dialog.submitKey.length === 1) {
     return { key: dialog.submitKey };
   }

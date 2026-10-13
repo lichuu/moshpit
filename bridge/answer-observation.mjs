@@ -50,6 +50,7 @@ export function createAnswerObservations({ randomUUID = systemRandomUUID, now = 
           answers: inspected.answers,
           focus: inspected.focus,
           actions: inspected.actions,
+          tabs: inspected.tabs ?? [],
           submitKey: inspected.submitKey ?? null,
         };
         targets.set(target, entry);

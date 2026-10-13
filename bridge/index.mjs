@@ -276,7 +276,7 @@ async function body(req, limit = 64 * 1024) {
 function questionStep(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const keys = Object.keys(value);
-  if (value.op === "review" || value.op === "submit") {
+  if (value.op === "review" || value.op === "submit" || value.op === "next" || value.op === "prev") {
     return keys.length === 1 ? { op: value.op } : null;
   }
   if (value.op === "text") {

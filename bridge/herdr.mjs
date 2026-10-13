@@ -134,6 +134,10 @@ function questionLanded(before, after, op) {
   }
   if (after?.kind !== "questions" || after.family !== before.family) return false;
   const id = op.op === "toggle" ? op.questionId : before.questions[0]?.id;
+  if (op.op === "next" || op.op === "prev") {
+    const headers = (dialog) => (dialog.tabs ?? []).map((tab) => tab.header).join("\u0000");
+    return after.phase === "select" && after.questions[0]?.id !== id && headers(before) !== "" && headers(before) === headers(after);
+  }
   const prev = before.questions.find((item) => item.id === id);
   const next = after.questions.find((item) => item.id === id);
   if (!prev || !next || prev.header !== next.header) return false;
@@ -174,7 +178,9 @@ async function readUntil(readDialog, ready) {
     try {
       const after = await readDialog();
       if (ready(after)) return after;
-    } catch { /* the next read is the retry */ }
+    } catch {
+      continue;
+    }
   }
   return null;
 }
@@ -1110,6 +1116,7 @@ function createExecHerdr(bin) {
                   answers: observed.answers,
                   focus: observed.focus,
                   actions: observed.actions,
+                  tabs: observed.tabs ?? [],
                   ...(observed.submitKey ? { submitKey: observed.submitKey } : {}),
                 };
               } else {

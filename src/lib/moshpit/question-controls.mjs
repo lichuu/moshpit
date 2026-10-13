@@ -17,7 +17,7 @@ export function questionControls(dialog, enabled = QUESTION_CONTROLS_ENABLED) {
       controls: [{ op: "text", questionId: question.id, label: question.other?.label || "Type something" }],
     };
   }
-  if (dialog.phase === "select" && dialog.actions?.includes("toggle") && dialog.actions.includes("review")) {
+  if (dialog.phase === "select" && dialog.actions?.includes("toggle") && (dialog.actions.includes("review") || dialog.actions.includes("next"))) {
     if (!question.options?.length) return null;
     return {
       token: dialog.expected.token,
@@ -33,7 +33,9 @@ export function questionControls(dialog, enabled = QUESTION_CONTROLS_ENABLED) {
           description: option.description || undefined,
           checked: option.checked === true,
         })),
-        { op: "review", label: "Review" },
+        ...(dialog.actions.includes("review") ? [{ op: "review", label: "Review" }] : []),
+        ...(dialog.actions.includes("next") ? [{ op: "next", label: "Next tab" }] : []),
+        ...(dialog.actions.includes("prev") ? [{ op: "prev", label: "Previous tab" }] : []),
       ],
     };
   }
