@@ -120,13 +120,17 @@ This feature uses dedicated checks:
 - The catalog is a host-side inventory of skill directories: it reflects
   what is on disk, not the agent's per-session settings (e.g. pi's
   `enableSkillCommands` toggle, project-level skill settings, or name
-  collisions can change what a running agent actually registers). Per-harness
-  project/config sources and full installed-catalog comparison remain open
-  S8 work; this surface is bounded partial discovery.
+  collisions can change what a running agent actually registers). The
+  2026-10-13 herdr probe found no read-only command registry, so this
+  surface stays bounded partial discovery. Full installed-catalog
+  comparison waits on that registry.
 - The demo host has no bridge, so it shows built-ins only; discovery is
   unavailable there, which is not a failure state.
 - Phones use Back to return to the agent list; wide layouts keep the list
   beside the detail, so agent switching selects directly.
-- Clipboard and touch checks dispatch browser events; a physical phone and
-  assistive-technology runs of the input/listbox pattern remain device
-  checks.
+- Clipboard and touch checks dispatch browser events. Names, roles, and
+  keyboard reachability of the suggestion list are checked by
+  `suggestions expose names and roles, and the keyboard reaches past the fold`
+  in `tests/bridge/commands.spec.ts` on the phone and desktop projects.
+  A physical screen reader, a physical phone, and the software keyboard
+  remain V1 device checks.
