@@ -161,17 +161,49 @@ function QuestionStepList({ model, onQuestion, onUseTerminal }: {
   onUseTerminal?: () => void;
 }) {
   const [lockedToken, setLockedToken] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const attempt = useRef(0);
   useEffect(() => {
     setLockedToken((current) => current && current !== model.token ? null : current);
   }, [model.token]);
   const locked = lockedToken === model.token;
+  const text = model.controls.find((control) => control.op === "text");
   return (
     <div className="mt-2 space-y-2" data-role="question-controls">
       {model.phase === "review" && model.answers?.length ? (
         <p className="text-sm text-muted">Selected: {model.answers.join(", ")}</p>
       ) : null}
-      {model.controls.map((control) => {
+      {text?.op === "text" ? (
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!draft || locked) return;
+            const n = ++attempt.current;
+            const token = model.token;
+            const value = draft;
+            setLockedToken(token);
+            onQuestion({ op: "text", questionId: text.questionId, text: value }, (outcome) => {
+              if (attempt.current !== n) return;
+              if (outcome.state === "delivered") setDraft("");
+              if (outcome.state !== "failed") return;
+              setLockedToken((current) => current === token ? null : current);
+            });
+          }}
+        >
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={locked}
+            aria-label={text.label}
+            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm"
+          />
+          <button type="submit" disabled={locked || !draft} className="flex h-11 w-full items-center justify-center rounded-lg border border-border text-sm font-medium tap-scale">
+            Send
+          </button>
+        </form>
+      ) : null}
+      {model.controls.filter((control) => control.op !== "text").map((control) => {
         const step: QuestionStep = control.op === "toggle"
           ? { op: "toggle", questionId: control.questionId, optionKey: control.optionKey }
           : { op: control.op };
@@ -541,6 +573,16 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
   const mounted = useRef(false);
   const [search, setSearch] = useState("");
   const [unseen, setUnseen] = useState(false);
+  const [recovery, setRecovery] = useState("");
+  const askQuestion = (step: QuestionStep, onOutcome?: AnswerCallback) => {
+    if (!onQuestion) return;
+    if (step.op === "text") setRecovery(step.text);
+    onQuestion(step, (outcome) => {
+      if (outcome.state === "delivered") setRecovery("");
+      onOutcome?.(outcome);
+    });
+  };
+  const textOpen = Boolean(questionControls(dialog)?.controls.some((control) => control.op === "text"));
   // Counts message expansion toggles: the choice lives in `Reading.open`, which
   // renders nothing by itself, and the layout effect re-enters applyReading.
   const [toggles, setToggles] = useState(0);
@@ -660,7 +702,7 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
           const pillKey = `${reviewPrefix}${group.id}`;
           const pill = reviewed ? <ReviewPill comments={reviewed.comments} expanded={normal.current.open.get(pillKey) ?? false} forced={Boolean(search)} onToggle={(open) => toggleMessage(pillKey, open)} /> : null;
           return entry?.kind === "question" ? (
-            <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
+            <QuestionCard key={group.id} entry={entry} dialog={dialog} blocked={blocked} onAnswer={onAnswer} onQuestion={onQuestion ? askQuestion : undefined} onUseTerminal={onUseTerminal} />
           ) : entry && "text" in entry ? (
             <article key={group.id} data-entry-id={group.id} data-role={entry.kind === "message" ? entry.role === "assistant" ? "agent" : "user" : "system"} className={entry.kind === "status" ? "text-xs text-muted" : entry.role === "user" ? "ml-auto max-w-[92%] rounded-xl bg-surface px-3 py-2" : "min-w-0 rounded-xl border border-border p-3 text-base leading-relaxed"}>
               {entry.kind === "message" && entry.role === "user" && isLongMessage(reviewed ? reviewed.body : entry.text)
@@ -675,7 +717,8 @@ export function Conversation({ sessionId, epoch = 0, entries, working, before, l
             <ActivityGroup key={group.id} id={group.id} activities={group.activities} search={Boolean(search)} reading={normal.current} onCopy={(a) => void copy(entryText(a))} />
           );
         })}
-        <LiveQuestion dialog={dialog} entries={entries} onQuestion={onQuestion} onUseTerminal={onUseTerminal} />
+        {recovery && !textOpen ? <p data-role="question-recovery" className="text-sm text-muted">Kept: {recovery}</p> : null}
+        <LiveQuestion dialog={dialog} entries={entries} onQuestion={onQuestion ? askQuestion : undefined} onUseTerminal={onUseTerminal} />
         {search && !visible.length && <p className="text-sm text-muted">No matches in loaded history.</p>}
         {showWorking && trailing < 0 && workingLine}
       </div>

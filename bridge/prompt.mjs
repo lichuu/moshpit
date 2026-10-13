@@ -190,7 +190,17 @@ function inspectClaude(lines) {
 }
 
 const MULTI_FAMILY = "claude-ask-user-multiselect-v1";
-const MULTI_FOOTER = /^enter to select · ↑\/↓ to navigate · esc to cancel$/iu;
+const MULTI_FOOTER = /^enter to select · ↑\/↓ to navigate · (?:ctrl\+g to edit in vim · )?esc to cancel$/iu;
+const OTHER_EMPTY = "Type something";
+const OTHER_HINT = "Submit";
+export const QUESTION_TEXT_MAX = 64;
+
+export function questionText(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > QUESTION_TEXT_MAX) return null;
+  if ([...value].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return null;
+  if (value !== value.trim() || value === OTHER_EMPTY) return null;
+  return value;
+}
 const MULTI_TAB = /^←\s+([☐☒])\s+(\S+)\s+✔\s+Submit\s+→$/u;
 const MULTI_CHECK = /^\s*(❯)?\s*(\d+)\.\s+\[( |✔)\](?:\s+(\S.*?))?\s*$/u;
 const MULTI_CHAT = /^\s*(❯)?\s*(\d+)\.\s+Chat about this\s*$/u;
@@ -258,20 +268,34 @@ function inspectClaudeMultiSelect(lines) {
     if (started) return null;
     questionLines.push(line.trim());
   }
-  const options = rows.filter((row) => row.label !== "Type something");
-  const other = rows.find((row) => row.label === "Type something");
-  if (options.length !== 2 || !other || other.checked || other.pointer || !chat || chat.pointer) return null;
-  if (rows.length !== 3) return null;
+  if (!chat || chat.pointer || rows.length !== 3) return null;
+  const other = rows[rows.length - 1];
+  const options = rows.slice(0, -1);
+  if (compact(other.description) !== OTHER_HINT) return null;
+  if (options.length !== 2 || options.some((row) => !row.label || compact(row.description) === OTHER_HINT)) return null;
   const keys = [...options.map((row) => row.key), other.key, chat.key];
   if (keys.some((key, index) => key !== String(index + 1))) return null;
-  if (options.some((row) => !row.label)) return null;
-  const pointed = options.filter((row) => row.pointer);
-  if (pointed.length !== 1) return null;
+  const otherText = other.label === OTHER_EMPTY ? "" : other.label;
+  if (!otherText && other.label !== OTHER_EMPTY) return null;
+  if (otherText && (!other.checked || otherText.includes("["))) return null;
+  if (!otherText && other.checked) return null;
+  const editor = /ctrl\+g to edit in vim/iu.test(compact(card.at(-1) ?? ""));
+  const optionPointers = options.filter((row) => row.pointer);
+  if (editor !== other.pointer || optionPointers.length + (other.pointer ? 1 : 0) !== 1) return null;
   const question = compact(questionLines.join(" "));
   if (!question || !question.includes("?")) return null;
   const header = tab[2];
-  const answers = options.filter((row) => row.checked).map((row) => row.label);
   const questionId = question;
+  const focus = other.pointer
+    ? { kind: "other", key: other.key }
+    : { kind: "option", key: optionPointers[0].key };
+  const actions = other.pointer
+    ? (otherText ? [] : ["text"])
+    : ["toggle", "review"];
+  const answers = [
+    ...options.filter((row) => row.checked).map((row) => row.label),
+    ...(otherText ? [otherText] : []),
+  ];
   return {
     kind: "questions",
     family: MULTI_FAMILY,
@@ -287,19 +311,20 @@ function inspectClaudeMultiSelect(lines) {
         description: row.description,
         checked: row.checked,
       })),
-      other: { key: other.key, label: other.label, text: "", multiline: false },
+      other: { key: other.key, label: OTHER_EMPTY, text: otherText, multiline: false },
     }],
     answers: { [questionId]: answers },
-    focus: { kind: "option", key: pointed[0].key },
-    actions: ["toggle", "review"],
+    focus,
+    actions,
     signature: dialogSignature([
       MULTI_FAMILY,
       "select",
       header,
       question,
       ...options.map((row) => `${row.key}|${row.label}|${row.checked ? "1" : "0"}|${row.description}`),
-      `other|${other.key}`,
-      `focus|${pointed[0].key}`,
+      `other|${other.key}|${otherText}|${other.checked ? "1" : "0"}`,
+      `focus|${focus.kind}|${focus.key}`,
+      `editor|${editor ? "1" : "0"}`,
     ]),
   };
 }
@@ -392,6 +417,12 @@ export function planQuestionWrite(dialog, op) {
   if (op.op === "review" && dialog.phase === "select" && dialog.actions.includes("review")) return { key: "right" };
   if (op.op === "submit" && dialog.phase === "review" && dialog.actions.includes("submit") && typeof dialog.submitKey === "string" && dialog.submitKey.length === 1) {
     return { key: dialog.submitKey };
+  }
+  if (op.op === "text" && dialog.phase === "select" && dialog.actions.includes("text") && dialog.focus?.kind === "other") {
+    const question = dialog.questions.find((item) => item.id === op.questionId);
+    const text = questionText(op.text);
+    if (!question?.other || question.other.text || question.other.multiline || question.options.some((item) => item.checked) || !text) return null;
+    return { text };
   }
   return null;
 }

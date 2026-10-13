@@ -1,0 +1,30 @@
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/s10-capture
+
+
+❯ ask which capabilities to keep
+
+● User answered Claude's questions:
+  ⎿  · Which capabilities should the renderer keep? → pine
+
+✻ Worked for 0s · done 1:07 PM
+
+❯ Use the AskUserQuestion tool once. Ask exactly one single-select question. Header: Face. Question: Which face should
+  the log use? Options: Serif, Mono. Do not ask anything else and do not answer it yourself.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Caps  ✔ Submit  →
+
+Which capabilities should the renderer keep?
+
+  1. [ ] Color output
+         Use ANSI colors in rendered output.
+  2. [ ] Nerd Font
+         Assume a Nerd Font is installed and use its glyphs.
+❯ 3. [✔] red oak
+     Submit
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · ctrl+g to edit in Vim · Esc to cancel

@@ -12,6 +12,7 @@ export type AnswerOutcome = {
 };
 export type QuestionStep =
   | { op: "toggle"; questionId: string; optionKey: string }
+  | { op: "text"; questionId: string; text: string }
   | { op: "review" }
   | { op: "submit" };
 export type AnswerCallback = (outcome: AnswerOutcome) => void;
@@ -180,8 +181,8 @@ export type BlockedDialog =
       phase: "select" | "review";
       questions: DialogQuestion[];
       answers: Record<string, string[]>;
-      focus: { kind: "option" | "submit" | "cancel"; key: string };
-      actions: ("toggle" | "review" | "submit")[];
+      focus: { kind: "option" | "other" | "submit" | "cancel"; key: string };
+      actions: ("toggle" | "review" | "submit" | "text")[];
       submitKey?: string;
     }
   | { kind: "terminal"; question: string; options: BlockedOption[]; reason?: string };

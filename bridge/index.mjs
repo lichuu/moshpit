@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import webpush from "web-push";
 import { createPushDelivery, createPushReporter, createPushSender, createTransitionTracker, openPushStore, parsePushPrivacy, parsePushSubscription, pushPrivacyOf, PushError, pushAvailability } from "./push-delivery.mjs";
 import { createHerdr, herdrInput, isHerdrKind } from "./herdr.mjs";
+import { questionText } from "./prompt.mjs";
 import { listAgentCommands, scopedCatalog, CommandScopeError, ScanStoppedError, DEFAULT_DEADLINE_MS } from "./commands.mjs";
 import { createDiagnosticLimiter, DiagnosticError, MAX_DIAGNOSTIC_BYTES, parseDiagnostic } from "./diagnostics.mjs";
 import { createUploads, MAX_PROMPT_BODY, RequestError, readUploadedImage } from "./upload.mjs";
@@ -277,6 +278,12 @@ function questionStep(value) {
   const keys = Object.keys(value);
   if (value.op === "review" || value.op === "submit") {
     return keys.length === 1 ? { op: value.op } : null;
+  }
+  if (value.op === "text") {
+    if (keys.length !== 3) return null;
+    if (typeof value.questionId !== "string" || !value.questionId || value.questionId.length > 2000) return null;
+    const text = questionText(value.text);
+    return text ? { op: "text", questionId: value.questionId, text } : null;
   }
   if (value.op !== "toggle" || keys.length !== 3) return null;
   if (typeof value.questionId !== "string" || !value.questionId || value.questionId.length > 2000) return null;
