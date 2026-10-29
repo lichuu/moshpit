@@ -22,7 +22,7 @@ export function Header() {
   const wide = layout.regime === "wide";
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 pb-4 pt-4 lg:px-7 lg:py-5">
+    <header className="workspace-header flex shrink-0 items-center gap-3 border-b border-border px-5 pb-4 pt-4 lg:px-7 lg:py-5">
       {wide ? null : <MoshpitMark className="size-7 shrink-0" />}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">

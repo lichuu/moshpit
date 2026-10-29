@@ -584,7 +584,7 @@ export function Moshpit() {
           );
         })}
       </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+      <div className="min-h-0 flex-1 scroll-pb-6 space-y-1 overflow-y-auto px-3 pb-4">
         {list.length === 0 ? (
           <p className="px-1 py-10 text-center text-sm text-muted">
             Nothing in this filter.

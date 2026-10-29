@@ -166,7 +166,15 @@ test.describe("blocked composer", () => {
   });
 });
 
+// The collapsible row is the layout for a phone with height to spare. The
+// iPhone 13 profile is a Safari tab at 664px, which is a short screen.
+const TALL_PHONE = { width: 390, height: 844 };
+
 test.describe("quick replies", () => {
+  test.beforeEach(async ({ demo }) => {
+    if (demo.viewportSize()!.width < 1024) await demo.setViewportSize(TALL_PHONE);
+  });
+
   test("is collapsed by default and can be expanded again", async ({ demo }) => {
     await demo.getByRole("button", { name: "tailscale-docs" }).click();
     const disclosure = demo.locator("summary").filter({ hasText: "Quick replies" });
@@ -290,3 +298,36 @@ test.describe("snippets", () => {
     await expect(demo.getByRole("button", { name: "Insert snippet renamed" })).toHaveCount(0);
   });
 });
+
+// The iPhone Duo's outer display beside its status column, and its inner
+// display held landscape: both are short screens in the phone layout.
+for (const size of [{ width: 383, height: 678 }, { width: 890, height: 626 }]) {
+  test.describe(`short screen ${size.width}x${size.height}`, () => {
+    test.beforeEach(async ({ demo }) => {
+      await demo.setViewportSize(size);
+    });
+
+    test("quick replies move to the input toolbar and still send", async ({ demo }) => {
+      await demo.getByRole("button", { name: "tailscale-docs" }).click();
+      const prompt = demo.getByPlaceholder("Message this agent…");
+      await expect(prompt).toBeVisible();
+      await expect(demo.locator("summary").filter({ hasText: "Quick replies" })).toHaveCount(0);
+
+      await prompt.fill("keep this draft");
+      await demo.getByRole("button", { name: "Quick replies", exact: true }).click();
+      const menu = demo.getByRole("region", { name: "Quick replies" });
+      const yes = menu.getByRole("button", { name: "yes", exact: true });
+      await expect(yes).toBeInViewport({ ratio: 1 });
+      await yes.click();
+      await expect(menu).toBeHidden();
+      await expect(prompt).toHaveValue("keep this draft");
+    });
+
+    test("a blocked question and the whole composer fit together", async ({ demo }) => {
+      await demo.getByRole("button", { name: /^migrate\b/ }).click();
+      await expect(demo.getByRole("button", { name: "Answer in Terminal" })).toBeInViewport({ ratio: 1 });
+      await expect(demo.getByRole("button", { name: "Send" })).toBeInViewport({ ratio: 1 });
+      await expect(demo.getByRole("navigation", { name: "Primary" })).toBeInViewport({ ratio: 1 });
+    });
+  });
+}

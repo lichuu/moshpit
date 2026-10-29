@@ -3,7 +3,7 @@ import { blockedCount, useMoshpitStore } from "@/lib/moshpit/store";
 import { probeBridgeOrigin } from "@/lib/moshpit/bridge";
 import { breadcrumb } from "@/lib/moshpit/blackbox";
 import { armAudio, useAudioStatus } from "@/lib/moshpit/cues";
-import { WIDE_MIN_PX } from "@/lib/moshpit/layout";
+import { isWideViewport } from "@/lib/moshpit/layout";
 import type { TabId } from "@/lib/moshpit/types";
 import {
   DEFAULT_THEME,
@@ -27,7 +27,7 @@ function applySearch(search: string) {
   if (agent && (!tab || tab === "steer")) {
     const store = useMoshpitStore.getState();
     store.selectAgent(agent);
-    if (window.innerWidth >= WIDE_MIN_PX) store.setTab("moshpit");
+    if (isWideViewport()) store.setTab("moshpit");
     return;
   }
   // Older links opened the global Terminal tab. Terminal now belongs to an
@@ -37,7 +37,7 @@ function applySearch(search: string) {
     store.setDetailView("terminal");
     const target = agent ?? store.selectedAgentId;
     if (target) store.selectAgent(target);
-    if (window.innerWidth >= WIDE_MIN_PX) store.setTab("moshpit");
+    if (isWideViewport()) store.setTab("moshpit");
     return;
   }
   if (tab && isTabId(tab)) {

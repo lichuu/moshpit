@@ -310,7 +310,7 @@ export function AgentDetail({ phone = false }: { phone?: boolean }) {
       >
         <header
           className={cn(
-            "shrink-0 border-b border-border px-4 pb-0 lg:px-7",
+            "detail-header shrink-0 border-b border-border px-4 pb-0 lg:px-7",
             phone ? "pt-4" : "pt-6",
           )}
         >

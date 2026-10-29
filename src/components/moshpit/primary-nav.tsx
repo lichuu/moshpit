@@ -33,7 +33,7 @@ export function PrimaryNav() {
       className={
         side
           ? "workspace-nav flex w-[var(--layout-sidebar)] shrink-0 flex-col gap-1 border-r border-border px-3 pt-4 pb-4"
-          : "workspace-nav grid shrink-0 grid-cols-3 border-t border-border pb-safe"
+          : "workspace-nav bottom-bar grid shrink-0 grid-cols-3"
       }
       aria-label="Primary"
     >
@@ -68,8 +68,8 @@ export function PrimaryNav() {
               "relative rounded-lg font-medium",
               side
                 ? "flex h-11 items-center gap-3 px-3 text-sm"
-                : "flex h-14 flex-col items-center justify-center gap-0.5 text-2xs",
-              active ? "text-fg md:bg-bg/70" : "text-muted",
+                : "flex h-13 flex-col items-center justify-center gap-0.5 text-2xs",
+              active ? "text-fg" : "text-muted",
             )}
             title={item.label === "moshpit" ? "Your agents" : item.label}
             aria-current={active ? "page" : undefined}
@@ -77,7 +77,7 @@ export function PrimaryNav() {
             <span className="relative">
               <Icon className="size-5" strokeWidth={active ? 2.2 : 1.7} />
               {badge ? (
-                <span className="absolute -right-2 -top-1 min-w-3.5 rounded-full bg-blocked px-1 text-center text-2xs leading-4 text-blocked-fg tabular-nums">
+                <span className="absolute -right-2.5 -top-1.5 min-w-3.5 rounded-full bg-blocked px-1 text-center text-2xs leading-4 text-blocked-fg tabular-nums">
                   {badge}
                 </span>
               ) : null}
