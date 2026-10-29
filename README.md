@@ -14,13 +14,15 @@ The PWA is the release target for phones, tablets, laptops, and desktops. Native
   <img src="docs/screenshots/phone-chat.png" alt="An agent's chat on a phone" width="32%">
 </p>
 
+![An unfolded iPhone Duo: the agent list beside a blocked agent's chat](docs/screenshots/duo-unfolded.png)
+
 ## Workspace
 
 - **moshpit** shows your agents, with filters and a persistent conversation pane on larger screens.
 - **Inbox** puts unresolved decisions ahead of completed activity; supported live choices can be answered from Chat or Inbox.
 - **Hosts** manages browser bridge connections, appearance, notifications, and installation.
 
-Phones use bottom navigation and a Back button inside each agent. Tablets use the available screen width. Laptops have a compact rail; desktops have a labeled sidebar. Chat has a readable text column, and Terminal uses the full detail pane.
+Phones use a floating bottom bar and a Back button inside each agent. An unfolded iPhone Duo shows the agent list beside the agent. Tablets in portrait use the available screen width. Laptops have a compact rail; desktops have a labeled sidebar. Chat has a readable text column, and Terminal uses the full detail pane.
 
 Chat includes session history, image attachments, saved drafts, snippets, command suggestions, and collapsible quick replies. It can show the agent's live pane in place, for the menu or prompt a command opens. Native dialog support is deliberately narrow: recognized Codex choices use the pane's printed keys; unsupported dialogs fall back to Terminal. Blocked text replies insert without pressing Enter.
 
