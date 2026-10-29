@@ -234,7 +234,7 @@ export function Terminal({ onOpenChanges }: { onOpenChanges?: (returnTo: HTMLEle
 
   const strip = useRef<HTMLDivElement | null>(null);
   const [quickSlot, setQuickSlot] = useState<HTMLDivElement | null>(null);
-  const moreKeys = useMoreToRight(strip, layout.regime !== "wide");
+  const moreKeys = useMoreToRight(strip, true);
   const surface = useRef<PaneHandle | null>(null);
   const terminalRoot = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<PaneStatus>({ state: "connecting", attempt: 0, error: null });
@@ -363,11 +363,13 @@ export function Terminal({ onOpenChanges }: { onOpenChanges?: (returnTo: HTMLEle
           ) : null}
           <div
             ref={strip}
-            className={
-              layout.regime === "wide"
-                ? "flex min-w-0 flex-1 flex-wrap gap-1"
-                : "flex min-w-0 flex-1 gap-1 overflow-x-auto"
-            }
+            // One row that scrolls, except beside the list with a mouse, where
+            // a sideways scroll is awkward and the keys wrap instead. A touch
+            // screen in the wide layout (the iPhone Duo opened) scrolls too.
+            className={cn(
+              "flex min-w-0 flex-1 gap-1 overflow-x-auto",
+              layout.regime === "wide" && "pointer-fine:flex-wrap",
+            )}
             // A key cut clean in half reads as broken; a fade reads as "more".
             style={
               moreKeys

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { CURRENT_RELEASE } from "@/lib/moshpit/releases";
 import { inboxUnread, makeEvent, newId } from "./events";
 import { cueCandidates, cueDelayMs, cueOf, heldCues, openBlockedIds, playCue } from "./cues";
-import { WIDE_MIN_PX } from "./layout";
+import { isWideViewport } from "./layout";
 import { encodeImage, fetchSnapshot, fetchRequesterLogin, inspectPushSupport, consumePairing, discoverAccess, checkDeviceCredential, postAction, postLogin, postLogout, registerPush, updatePushSubscription, type KeyInput, type Snapshot, connectRefusal, diagnoseBridge, unregisterPush } from "./bridge";
 import { mergeLinks, pruneStaleLinks, splitLinkKey } from "./links";
 import { credentials, hostAccess, watchAccess, setHostAccess } from "./access";
@@ -408,7 +408,7 @@ function agentOnScreen(
   id: string,
 ) {
   if (s.detailAgentId === id) return true;
-  const wide = window.innerWidth >= WIDE_MIN_PX;
+  const wide = isWideViewport();
   return (
     wide &&
     (s.tab === "moshpit" || s.tab === "inbox") &&

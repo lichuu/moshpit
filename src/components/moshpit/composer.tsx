@@ -18,6 +18,7 @@ import { SNIPPET_LIMITS, validateSnippet } from "@/lib/moshpit/snippets";
 import { quickRepliesFor, type QuickReply } from "@/lib/moshpit/quick-replies";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
+import { useShortScreen } from "@/lib/moshpit/use-layout";
 import { useOnline } from "@/lib/moshpit/network";
 import { validateImage } from "@/lib/moshpit/image";
 import { DEMO_FILE_DIRECTORY, formatBytes, insertQuotedPath, isImageFile, validateFile } from "@/lib/moshpit/file-upload";
@@ -60,10 +61,12 @@ const commandLike = (text: string) => /^\s*[/$][\w:.-]*(\s|$)/.test(text);
  * full-width row between the key bar and the input cost the pane a row of
  * height on every screen, for replies used now and then.
  */
-function QuickRepliesMenu({ replies, disabled, onPick }: {
+function QuickRepliesMenu({ replies, disabled, onPick, toolbar = false }: {
   replies: readonly QuickReply[];
   disabled: boolean;
   onPick: (reply: QuickReply) => void;
+  /** On the input's toolbar: drawn like the buttons beside it. */
+  toolbar?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
@@ -76,7 +79,7 @@ function QuickRepliesMenu({ replies, disabled, onPick }: {
       title="Quick replies"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => setOpen((v) => !v)}
-      className={cn("flex size-9 items-center justify-center rounded-sm text-muted shadow-border", open && "bg-surface-2")}
+      className={cn("flex items-center justify-center text-muted", toolbar ? "size-10 rounded-lg" : "size-9 rounded-sm shadow-border", open && "bg-surface-2")}
     ><Reply className="size-4" aria-hidden="true" /></button>
     {open && <section aria-label="Quick replies" className="absolute bottom-11 right-0 z-20 w-64 rounded-xl border border-border bg-bg p-2 shadow-lg">
       <div className="quick-replies-list flex flex-wrap gap-2">
@@ -229,6 +232,10 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const ownsKeyboard = Boolean(choose);
   const chooseLocked = Boolean(choose && answerLock?.token === choose.expected.token);
   const quickReplies = quickRepliesFor(agent.kind);
+  // A short screen has no row to spare for a collapsed list, so Chat puts its
+  // quick replies on the input's toolbar, as Terminal does on its key bar.
+  const short = useShortScreen();
+  const chatRepliesInMenu = !terminal && short && quickReplies.length > 0;
   const showBlockedReplyKeys = !terminal && agent.status === "blocked" && blockedInsertion;
 
   useEffect(() => () => { const rec = recognition.current; recognition.current = null; rec?.stop(); }, []);
@@ -603,7 +610,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </>,
         quickRepliesSlot,
       )}
-      {quickReplies.length > 0 && !(terminal && quickRepliesSlot) && <details className="quick-replies group mb-2 overflow-hidden rounded-xl border border-border bg-surface/40">
+      {quickReplies.length > 0 && !(terminal && quickRepliesSlot) && !chatRepliesInMenu && <details className="quick-replies group mb-2 overflow-hidden rounded-xl border border-border bg-surface/40">
       <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted">
         <span className="flex items-center gap-2"><Slash className="size-3.5" aria-hidden="true" />Quick replies</span>
         <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
@@ -749,6 +756,12 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
             </div>
           </div>
         </details>
+        {chatRepliesInMenu && <QuickRepliesMenu
+          toolbar
+          replies={quickReplies}
+          disabled={unavailable || busy || !canSend}
+          onPick={(reply) => void submit(selectedMode, reply.text)}
+        />}
         {capabilities.stop && agent.status === "working" && <button type="button" aria-label="Stop agent" onClick={() => void submit("stop")} disabled={busy || unavailable} className="flex size-10 items-center justify-center rounded-lg text-muted"><Square className="size-4" /></button>}
         <div className="ml-auto flex items-center gap-1">
           {!terminal && modes.length > 1 && <label className="flex items-center text-xs text-muted"><select aria-label="Send mode" value={selectedMode} onChange={(e) => { const value = e.target.value; if (value === "send" || value === "steer" || value === "queue") setInputMode(value); }} className="max-w-32 appearance-none bg-transparent py-2 pl-2 text-xs">{modes.map((value) => <option key={value} value={value}>{value === "send" ? "Native Enter" : value === "steer" ? "Steer" : "Queue"}</option>)}</select><ChevronDown className="size-3" /></label>}

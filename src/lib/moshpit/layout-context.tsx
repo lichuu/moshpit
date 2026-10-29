@@ -1,9 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { layoutFor, WIDE_MIN_PX, type LayoutRegime } from "./layout";
+import { layoutFor, WIDE_QUERY, type LayoutRegime } from "./layout";
 import { LayoutContext } from "./use-layout";
 import { useMoshpitStore } from "./store";
 
-const QUERY = `(min-width: ${WIDE_MIN_PX}px)`;
+const QUERY = WIDE_QUERY;
 
 function subscribe(onStoreChange: () => void) {
   const mq = window.matchMedia(QUERY);

@@ -297,7 +297,7 @@ export function Inbox() {
           Decisions first. Everything else can wait.
         </p>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+      <div className="min-h-0 flex-1 scroll-pb-6 space-y-3 overflow-y-auto px-4 pb-4">
         {needsYou.length ? (
           <>
             <p className="px-1 pt-1 text-2xs font-medium uppercase tracking-[0.18em] text-blocked">
