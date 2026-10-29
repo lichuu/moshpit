@@ -354,3 +354,9 @@ export async function agentAction(
 }
 
 export { expect } from "@playwright/test";
+
+/** Opens the composer's tools tray ("+") unless it is already open. */
+export async function openComposerTools(page: Page) {
+  const toggle = page.getByRole("button", { name: "Composer tools" });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+}

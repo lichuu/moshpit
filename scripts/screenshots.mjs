@@ -43,6 +43,12 @@ await shot(desktop, "desktop-chat");
 await desktop.getByRole("button", { name: "Terminal view", exact: true }).click();
 await shot(desktop, "desktop-terminal");
 
+// The iPhone Duo's inner display, held landscape: the list beside the detail.
+const duo = await open({ width: 890, height: 626 });
+await duo.getByRole("button", { name: /^migrate\b/ }).first().click();
+await duo.locator('[data-role="question"]').first().waitFor();
+await shot(duo, "duo-unfolded");
+
 const phone = await open({ width: 390, height: 844 });
 await shot(phone, "phone-agents");
 const nav = phone.getByRole("navigation", { name: "Primary" });

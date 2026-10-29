@@ -1,4 +1,4 @@
-import { ArrowUp, BookMarked, ChevronDown, Keyboard, LoaderCircle, Mic, Paperclip, Pencil, Reply, Slash, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, BookMarked, ChevronDown, Keyboard, LoaderCircle, Mic, Paperclip, Pencil, Plus, Reply, Slash, Square, Trash2, X } from "lucide-react";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { toast } from "sonner";
@@ -18,7 +18,6 @@ import { SNIPPET_LIMITS, validateSnippet } from "@/lib/moshpit/snippets";
 import { quickRepliesFor, type QuickReply } from "@/lib/moshpit/quick-replies";
 import { useDismiss } from "@/lib/moshpit/use-dismiss";
 import { cn } from "@/lib/utils";
-import { useShortScreen } from "@/lib/moshpit/use-layout";
 import { useOnline } from "@/lib/moshpit/network";
 import { validateImage } from "@/lib/moshpit/image";
 import { DEMO_FILE_DIRECTORY, formatBytes, insertQuotedPath, isImageFile, validateFile } from "@/lib/moshpit/file-upload";
@@ -61,12 +60,10 @@ const commandLike = (text: string) => /^\s*[/$][\w:.-]*(\s|$)/.test(text);
  * full-width row between the key bar and the input cost the pane a row of
  * height on every screen, for replies used now and then.
  */
-function QuickRepliesMenu({ replies, disabled, onPick, toolbar = false }: {
+function QuickRepliesMenu({ replies, disabled, onPick }: {
   replies: readonly QuickReply[];
   disabled: boolean;
   onPick: (reply: QuickReply) => void;
-  /** On the input's toolbar: drawn like the buttons beside it. */
-  toolbar?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
@@ -79,7 +76,7 @@ function QuickRepliesMenu({ replies, disabled, onPick, toolbar = false }: {
       title="Quick replies"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => setOpen((v) => !v)}
-      className={cn("flex items-center justify-center text-muted", toolbar ? "size-10 rounded-lg" : "size-9 rounded-sm shadow-border", open && "bg-surface-2")}
+      className={cn("flex size-9 items-center justify-center rounded-sm text-muted shadow-border", open && "bg-surface-2")}
     ><Reply className="size-4" aria-hidden="true" /></button>
     {open && <section aria-label="Quick replies" className="absolute bottom-11 right-0 z-20 w-64 rounded-xl border border-border bg-bg p-2 shadow-lg">
       <div className="quick-replies-list flex flex-wrap gap-2">
@@ -232,10 +229,9 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   const ownsKeyboard = Boolean(choose);
   const chooseLocked = Boolean(choose && answerLock?.token === choose.expected.token);
   const quickReplies = quickRepliesFor(agent.kind);
-  // A short screen has no row to spare for a collapsed list, so Chat puts its
-  // quick replies on the input's toolbar, as Terminal does on its key bar.
-  const short = useShortScreen();
-  const chatRepliesInMenu = !terminal && short && quickReplies.length > 0;
+  // Attach, commands, keys, snippets and quick replies wait behind "+", so the
+  // box at rest is the draft and one row of actions.
+  const [trayOpen, setTrayOpen] = useState(false);
   const showBlockedReplyKeys = !terminal && agent.status === "blocked" && blockedInsertion;
 
   useEffect(() => () => { const rec = recognition.current; recognition.current = null; rec?.stop(); }, []);
@@ -262,8 +258,12 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
   // lands after any of them moved is stale and must not write the draft.
   const gesture = useRef<{ key: string; revision: number; start: number; end: number; token: string; invocation: string } | null>(null);
   const noMatch = Boolean(activeToken && catalog && matches.length === 0 && (dismissedToken === null || dismissedToken !== tokenString));
+  // Said only while a command is being typed, where it explains a missing
+  // list. A failure keeps its line, since that line carries Retry.
+  const typingCommand = Boolean(activeToken) || commandLike(draft.text);
   const discoveryNote = (() => {
     if (!liveDiscovery) return null;
+    if (!typingCommand && liveDiscovery.status !== "failed") return null;
     switch (liveDiscovery.status) {
       case "loading":
         return "Loading commands…";
@@ -610,23 +610,6 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </>,
         quickRepliesSlot,
       )}
-      {quickReplies.length > 0 && !(terminal && quickRepliesSlot) && !chatRepliesInMenu && <details className="quick-replies group mb-2 overflow-hidden rounded-xl border border-border bg-surface/40">
-      <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted">
-        <span className="flex items-center gap-2"><Slash className="size-3.5" aria-hidden="true" />Quick replies</span>
-        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
-      </summary>
-      <section aria-label="Quick replies" className="border-t border-border p-2">
-      <div className="quick-replies-list flex flex-wrap gap-2">
-        {quickReplies.map((reply) => <button
-          key={reply.id}
-          type="button"
-          disabled={unavailable || busy || !canSend}
-          className="min-h-10 rounded-lg border border-border bg-bg px-3 py-2 text-left text-sm tap-scale disabled:opacity-50"
-          onClick={() => void submit(terminal ? "terminal" : selectedMode, reply.text)}
-        >{reply.label}</button>)}
-      </div>
-      </section>
-    </details>}
       {listVisible && <div className="mb-1 overflow-hidden rounded-t-2xl border border-border-strong bg-bg">
       <div className="flex items-center justify-between px-3 pt-2">
         <p className="text-xs text-muted">{catalog?.coverage === "partial" ? "Commands · may be incomplete" : catalog?.coverage === "unsupported" ? "Commands · discovery unavailable" : "Commands"}</p>
@@ -660,7 +643,7 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
         </p>
       )}
     </div>
-    <div className={`composer-panel shrink-0 rounded-2xl border bg-bg p-2 focus-within:border-accent/70 ${dragging ? "border-accent ring-2 ring-accent/20" : "border-border-strong"}`}>
+    <div className={`composer-panel shrink-0 rounded-3xl border bg-surface p-1.5 focus-within:border-accent/60 ${dragging ? "border-accent ring-2 ring-accent/20" : "border-border"}`}>
       {dragging && <p className="p-2 text-sm text-accent">Drop a file here</p>}
       {draft.attachment && <div className="composer-attachment mb-1 flex items-center gap-2 rounded-lg bg-surface p-2">
         {preview && <img src={preview} alt={`Attachment preview: ${draft.attachment.name}`} className="size-10 rounded object-cover" />}
@@ -710,62 +693,70 @@ function SessionComposer({ agent, draftKey, capabilities = fallbackCapabilities,
           }
         }}
         placeholder={terminal ? "Type or dictate terminal input" : "Message this agent…"}
-        className="block max-h-40 min-h-10 w-full resize-none bg-transparent px-2 py-2 text-base leading-6 outline-none placeholder:text-subtle" />
-      <div className="flex items-center gap-1">
-        <input ref={file} type="file" hidden onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
-        <button ref={attach} type="button" aria-label="Attach file" disabled={busy} onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted disabled:opacity-50"><Paperclip className="size-4" /></button>
-        {!terminal && buttonPrefix && <button type="button" aria-label={insertLabel} onClick={() => insertCommandPrefix()} disabled={busy} className="flex size-10 items-center justify-center rounded-lg text-muted"><Slash className="size-4" /></button>}
-        <button type="button" aria-label={listening ? "Stop listening" : "Dictate"} aria-pressed={listening} onClick={dictate} disabled={busy} className={`flex size-10 items-center justify-center rounded-lg ${listening ? "text-blocked" : "text-muted"}`}><Mic className="size-4" /></button>
-        <details ref={tools} className="relative">
-          <summary aria-label="Input tools" onMouseDown={(event) => event.preventDefault()} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><Keyboard className="size-4" /></summary>
-          <div className="absolute bottom-12 left-0 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-xs text-muted">Input tools</p>
-              <button type="button" aria-label="Close input tools" className="p-2 text-muted" onClick={() => { if (tools.current) tools.current.open = false; }}><X className="size-4" /></button>
-            </div>
-            <div className="flex flex-wrap gap-1">{["esc", "tab", "shift+tab", "enter", "ctrl+c", "up", "down"].map((key) => <button type="button" key={key} disabled={unavailable} onClick={() => sendKeys(agent.id, key)} className="rounded bg-surface px-3 py-2 font-mono text-xs">{key}</button>)}</div>
-            <button type="button" onClick={() => { saved.discard(); }} className="mt-2 block py-2 text-sm text-muted">Discard draft</button>
-            <button type="button" onClick={() => void listDrafts().then(setRecovered)} className="block py-2 text-sm text-muted">Recover saved drafts</button>
-            {recovered.filter((item) => JSON.stringify(item.key) !== JSON.stringify(draftKey)).map((item) => <button key={JSON.stringify(item.key)} type="button" disabled={Boolean(draft.text || draft.attachment || draft.comments.length)} title="Empty or discard the current draft before restoring another" onClick={() => { saved.update({ text: item.draft.text, attachment: item.draft.attachment, comments: item.draft.comments }); setRecovered([]); }} className="block w-full truncate rounded py-2 text-left text-xs disabled:opacity-50">{item.key[0]} · {item.draft.text.slice(0, 70) || item.draft.attachment?.name || reviewCommentLabel(item.draft.comments.length)}</button>)}
-          </div>
-        </details>
-        <details ref={picker} className="relative" onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) snippetSel.current = null; }}>
-          <summary aria-label="Snippets" onMouseDown={(event) => event.preventDefault()} onClick={captureSelection} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><BookMarked className="size-4" /></summary>
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-xs text-muted">Snippets</p>
-              <button type="button" aria-label="Close snippets" className="p-2 text-muted" onClick={() => { if (picker.current) picker.current.open = false; }}><X className="size-4" /></button>
-            </div>
-            <form onSubmit={(event) => { event.preventDefault(); saveSnippetForm(); }}>
-              <div className="flex gap-1">
-                <input aria-label="Snippet name" value={snippetName} onChange={(event) => { setSnippetName(event.target.value); setSnippetFormError(null); }} placeholder="Name" className="min-w-0 flex-1 rounded bg-surface px-2 py-2 text-xs outline-none" />
-                <button type="submit" aria-label={snippetEditingId ? "Update snippet" : "Save snippet"} disabled={busy} className="rounded bg-accent px-3 py-2 text-xs text-bg disabled:opacity-40">{snippetEditingId ? "Update" : "Save"}</button>
-                {snippetEditingId && <button type="button" aria-label="Cancel edit" onClick={resetSnippetForm} className="rounded bg-surface px-2 py-2 text-xs text-muted">Cancel</button>}
+        className="block max-h-40 min-h-9 w-full resize-none bg-transparent px-3 py-1.5 text-base leading-6 outline-none placeholder:text-subtle" />
+      {trayOpen && <div className="composer-tray my-1 flex flex-col gap-2 border-y border-border px-1 py-2">
+        <div className="flex items-center gap-1">
+          <button ref={attach} type="button" aria-label="Attach file" disabled={busy} onClick={() => file.current?.click()} className="flex size-10 items-center justify-center rounded-lg text-muted disabled:opacity-50"><Paperclip className="size-4" /></button>
+          {!terminal && buttonPrefix && <button type="button" aria-label={insertLabel} onClick={() => insertCommandPrefix()} disabled={busy} className="flex size-10 items-center justify-center rounded-lg text-muted"><Slash className="size-4" /></button>}
+          <details ref={tools} className="relative">
+            <summary aria-label="Input tools" onMouseDown={(event) => event.preventDefault()} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><Keyboard className="size-4" /></summary>
+            <div className="absolute bottom-12 left-0 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs text-muted">Input tools</p>
+                <button type="button" aria-label="Close input tools" className="p-2 text-muted" onClick={() => { if (tools.current) tools.current.open = false; }}><X className="size-4" /></button>
               </div>
-              <textarea aria-label="Snippet text" value={snippetText} onChange={(event) => { setSnippetText(event.target.value); setSnippetFormError(null); }} placeholder="Prompt text" className="mt-1 h-16 w-full resize-none rounded bg-surface p-2 text-xs outline-none" />
-              {snippetFormError && <p role="alert" className="mt-1 text-xs text-blocked">{snippetFormError}</p>}
-              <p className="mt-1 text-[10px] text-subtle">Inserts into your draft without sending.</p>
-            </form>
-            <div className="mt-2 max-h-48 overflow-y-auto">
-              {snippets.length === 0 && <p className="py-2 text-xs text-subtle">No snippets yet. Save the current text above.</p>}
-              {snippets.map((snippet) => <div key={snippet.id} className="flex items-center gap-1">
-                <button type="button" aria-label={`Insert snippet ${snippet.name}`} disabled={busy} onClick={() => insertSnippet(snippet)} className="min-w-0 flex-1 truncate rounded py-2 pr-1 text-left text-xs">{snippet.name}</button>
-                <button type="button" aria-label={`Edit snippet ${snippet.name}`} onClick={() => editSnippet(snippet)} className="p-2 text-muted"><Pencil className="size-3.5" /></button>
-                <button type="button" aria-label={`Delete snippet ${snippet.name}`} onClick={() => { deleteSnippet(snippet.id); if (snippetEditingId === snippet.id) resetSnippetForm(); }} className="p-2 text-muted"><Trash2 className="size-3.5" /></button>
-              </div>)}
+              <div className="flex flex-wrap gap-1">{["esc", "tab", "shift+tab", "enter", "ctrl+c", "up", "down"].map((key) => <button type="button" key={key} disabled={unavailable} onClick={() => sendKeys(agent.id, key)} className="rounded bg-surface px-3 py-2 font-mono text-xs">{key}</button>)}</div>
+              <button type="button" onClick={() => { saved.discard(); }} className="mt-2 block py-2 text-sm text-muted">Discard draft</button>
+              <button type="button" onClick={() => void listDrafts().then(setRecovered)} className="block py-2 text-sm text-muted">Recover saved drafts</button>
+              {recovered.filter((item) => JSON.stringify(item.key) !== JSON.stringify(draftKey)).map((item) => <button key={JSON.stringify(item.key)} type="button" disabled={Boolean(draft.text || draft.attachment || draft.comments.length)} title="Empty or discard the current draft before restoring another" onClick={() => { saved.update({ text: item.draft.text, attachment: item.draft.attachment, comments: item.draft.comments }); setRecovered([]); }} className="block w-full truncate rounded py-2 text-left text-xs disabled:opacity-50">{item.key[0]} · {item.draft.text.slice(0, 70) || item.draft.attachment?.name || reviewCommentLabel(item.draft.comments.length)}</button>)}
             </div>
-          </div>
-        </details>
-        {chatRepliesInMenu && <QuickRepliesMenu
-          toolbar
-          replies={quickReplies}
-          disabled={unavailable || busy || !canSend}
-          onPick={(reply) => void submit(selectedMode, reply.text)}
-        />}
-        {capabilities.stop && agent.status === "working" && <button type="button" aria-label="Stop agent" onClick={() => void submit("stop")} disabled={busy || unavailable} className="flex size-10 items-center justify-center rounded-lg text-muted"><Square className="size-4" /></button>}
-        <div className="ml-auto flex items-center gap-1">
-          {!terminal && modes.length > 1 && <label className="flex items-center text-xs text-muted"><select aria-label="Send mode" value={selectedMode} onChange={(e) => { const value = e.target.value; if (value === "send" || value === "steer" || value === "queue") setInputMode(value); }} className="max-w-32 appearance-none bg-transparent py-2 pl-2 text-xs">{modes.map((value) => <option key={value} value={value}>{value === "send" ? "Native Enter" : value === "steer" ? "Steer" : "Queue"}</option>)}</select><ChevronDown className="size-3" /></label>}
-          <button type="button" aria-label="Send" disabled={unavailable || busy || !canSend || ownsKeyboard} onMouseDown={(event) => event.preventDefault()} onClick={() => void submit()} className="flex size-10 items-center justify-center rounded-full bg-accent text-bg disabled:opacity-40">{busy ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-5" />}</button>
+          </details>
+          <details ref={picker} className="relative" onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) snippetSel.current = null; }}>
+            <summary aria-label="Snippets" onMouseDown={(event) => event.preventDefault()} onClick={captureSelection} className="flex size-10 cursor-pointer list-none items-center justify-center text-muted"><BookMarked className="size-4" /></summary>
+            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 w-64 rounded-xl border border-border bg-bg p-3 shadow-lg">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs text-muted">Snippets</p>
+                <button type="button" aria-label="Close snippets" className="p-2 text-muted" onClick={() => { if (picker.current) picker.current.open = false; }}><X className="size-4" /></button>
+              </div>
+              <form onSubmit={(event) => { event.preventDefault(); saveSnippetForm(); }}>
+                <div className="flex gap-1">
+                  <input aria-label="Snippet name" value={snippetName} onChange={(event) => { setSnippetName(event.target.value); setSnippetFormError(null); }} placeholder="Name" className="min-w-0 flex-1 rounded bg-surface px-2 py-2 text-xs outline-none" />
+                  <button type="submit" aria-label={snippetEditingId ? "Update snippet" : "Save snippet"} disabled={busy} className="rounded bg-accent px-3 py-2 text-xs text-bg disabled:opacity-40">{snippetEditingId ? "Update" : "Save"}</button>
+                  {snippetEditingId && <button type="button" aria-label="Cancel edit" onClick={resetSnippetForm} className="rounded bg-surface px-2 py-2 text-xs text-muted">Cancel</button>}
+                </div>
+                <textarea aria-label="Snippet text" value={snippetText} onChange={(event) => { setSnippetText(event.target.value); setSnippetFormError(null); }} placeholder="Prompt text" className="mt-1 h-16 w-full resize-none rounded bg-surface p-2 text-xs outline-none" />
+                {snippetFormError && <p role="alert" className="mt-1 text-xs text-blocked">{snippetFormError}</p>}
+                <p className="mt-1 text-[10px] text-subtle">Inserts into your draft without sending.</p>
+              </form>
+              <div className="mt-2 max-h-48 overflow-y-auto">
+                {snippets.length === 0 && <p className="py-2 text-xs text-subtle">No snippets yet. Save the current text above.</p>}
+                {snippets.map((snippet) => <div key={snippet.id} className="flex items-center gap-1">
+                  <button type="button" aria-label={`Insert snippet ${snippet.name}`} disabled={busy} onClick={() => insertSnippet(snippet)} className="min-w-0 flex-1 truncate rounded py-2 pr-1 text-left text-xs">{snippet.name}</button>
+                  <button type="button" aria-label={`Edit snippet ${snippet.name}`} onClick={() => editSnippet(snippet)} className="p-2 text-muted"><Pencil className="size-3.5" /></button>
+                  <button type="button" aria-label={`Delete snippet ${snippet.name}`} onClick={() => { deleteSnippet(snippet.id); if (snippetEditingId === snippet.id) resetSnippetForm(); }} className="p-2 text-muted"><Trash2 className="size-3.5" /></button>
+                </div>)}
+              </div>
+            </div>
+          </details>
+        </div>
+        {quickReplies.length > 0 && !(terminal && quickRepliesSlot) && <section aria-label="Quick replies" className="quick-replies-list flex flex-wrap gap-2">
+          {quickReplies.map((reply) => <button
+            key={reply.id}
+            type="button"
+            disabled={unavailable || busy || !canSend}
+            className="min-h-9 rounded-full border border-border bg-bg px-3 py-1.5 text-left text-sm tap-scale disabled:opacity-50"
+            onClick={() => { setTrayOpen(false); void submit(terminal ? "terminal" : selectedMode, reply.text); }}
+          >{reply.label}</button>)}
+        </section>}
+      </div>}
+      <div className="composer-actions flex items-center gap-1.5">
+        <input ref={file} type="file" hidden onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
+        <button type="button" aria-label="Composer tools" aria-expanded={trayOpen} title="Attach, commands, keys, snippets and quick replies" onMouseDown={(event) => event.preventDefault()} onClick={() => setTrayOpen((open) => !open)} className={cn("flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted", trayOpen && "text-fg")}><Plus className={cn("size-4 transition-transform duration-quick", trayOpen && "rotate-45")} /></button>
+          {!terminal && modes.length > 1 && <label className="flex h-9 items-center gap-1 rounded-full bg-surface-2 pr-3 text-xs text-muted"><select aria-label="Send mode" value={selectedMode} onChange={(e) => { const value = e.target.value; if (value === "send" || value === "steer" || value === "queue") setInputMode(value); }} className="max-w-32 appearance-none bg-transparent py-2 pl-3 text-xs">{modes.map((value) => <option key={value} value={value}>{value === "send" ? "Native Enter" : value === "steer" ? "Steer" : "Queue"}</option>)}</select><ChevronDown className="size-3" /></label>}
+        <div className="ml-auto flex items-center gap-1.5">
+        {capabilities.stop && agent.status === "working" && <button type="button" aria-label="Stop agent" onClick={() => void submit("stop")} disabled={busy || unavailable} className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted"><Square className="size-4" /></button>}
+        <button type="button" aria-label={listening ? "Stop listening" : "Dictate"} aria-pressed={listening} onClick={dictate} disabled={busy} className={`flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 ${listening ? "text-blocked" : "text-muted"}`}><Mic className="size-4" /></button>
+          <button type="button" aria-label="Send" disabled={unavailable || busy || !canSend || ownsKeyboard} onMouseDown={(event) => event.preventDefault()} onClick={() => void submit()} className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-bg disabled:opacity-40">{busy ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-5" />}</button>
         </div>
       </div>
     </div>

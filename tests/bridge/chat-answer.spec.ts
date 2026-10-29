@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone } from "../fixtures";
+import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone, openComposerTools } from "../fixtures";
 
 const QUESTION = "How should the generated file be indented?";
 const CARD_ONE = [
@@ -472,12 +472,6 @@ test.describe("live blocked insertions", () => {
 // draft store's settle -- the one thing that renders a receipt. A refusal has
 // to reach the reader some other way or the tap looks like it did nothing.
 test.describe("live quick replies", () => {
-  // The collapsible row is the tall-phone layout; the iPhone 13 profile is a
-  // 664px Safari tab, which is a short screen.
-  test.beforeEach(async ({ page }) => {
-    if (page.viewportSize()!.width < 1024) await page.setViewportSize({ width: 390, height: 844 });
-  });
-
   test("disables quick replies when the session has no send mode", async ({ page, bridge }) => {
     const host = await bridge({ herdr });
     await page.route(`${host.url}/api/session?*`, (route) =>
@@ -497,7 +491,7 @@ test.describe("live quick replies", () => {
     );
     await connectAnswerer(page, host);
 
-    await page.locator("summary").filter({ hasText: "Quick replies" }).click();
+    await openComposerTools(page);
     const quickReply = page.getByRole("region", { name: "Quick replies" }).getByRole("button", { name: "yes", exact: true });
     await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
     await expect(quickReply).toBeDisabled();

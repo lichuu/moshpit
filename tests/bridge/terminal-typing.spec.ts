@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone, type Bridge } from "../fixtures";
+import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone, openComposerTools, type Bridge } from "../fixtures";
 
 const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 
@@ -226,6 +226,7 @@ test("terminal picker, paste and drop deliver private images followed by Enter",
   const input = page.getByRole("textbox", { name: "Terminal input" });
   const text = "  inspect this\nkeep the spacing  ";
   await input.fill(text);
+  await openComposerTools(page);
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Attach file", exact: true }).click();
   await (await chooser).setFiles({ name: "picked.png", mimeType: "image/png", buffer: imageBytes });

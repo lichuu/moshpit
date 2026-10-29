@@ -1,10 +1,10 @@
 import path from "node:path";
-import { test, expect, isPhone, ROOT } from "../fixtures";
+import { test, expect, isPhone, openComposerTools, ROOT } from "../fixtures";
 
 const FIXTURE = path.join(ROOT, "tests/fixtures/tiny.png");
 
 async function openQuickReplies(page: import("@playwright/test").Page) {
-  await page.locator("summary").filter({ hasText: "Quick replies" }).click();
+  await openComposerTools(page);
   return page.getByRole("region", { name: "Quick replies" });
 }
 
@@ -58,6 +58,7 @@ test.describe("composer", () => {
     test(`${name} opens without blurring the composer`, async ({ demo }, testInfo) => {
       const prompt = demo.getByPlaceholder("Message this agent…");
       await prompt.fill("Keep this draft");
+      await openComposerTools(demo);
       const trigger = demo.getByLabel(name, { exact: true });
       const content = demo.getByRole("button", { name: name === "Snippets" ? "Close snippets" : "Close input tools" });
       await prompt.focus();
@@ -166,28 +167,18 @@ test.describe("blocked composer", () => {
   });
 });
 
-// The collapsible row is the layout for a phone with height to spare. The
-// iPhone 13 profile is a Safari tab at 664px, which is a short screen.
-const TALL_PHONE = { width: 390, height: 844 };
-
 test.describe("quick replies", () => {
-  test.beforeEach(async ({ demo }) => {
-    if (demo.viewportSize()!.width < 1024) await demo.setViewportSize(TALL_PHONE);
-  });
-
-  test("is collapsed by default and can be expanded again", async ({ demo }) => {
+  test("wait behind the tools button and close with it", async ({ demo }) => {
     await demo.getByRole("button", { name: "tailscale-docs" }).click();
-    const disclosure = demo.locator("summary").filter({ hasText: "Quick replies" });
+    const tools = demo.getByRole("button", { name: "Composer tools" });
     const dock = demo.getByRole("region", { name: "Quick replies" });
-    await expect(disclosure).toBeVisible();
     await expect(dock).toBeHidden();
 
-    await disclosure.click();
-    await expect(dock).toBeVisible();
+    await tools.click();
     await expect(dock.getByRole("button", { name: "yes", exact: true })).toBeEnabled();
     await expect(dock.getByRole("button", { name: "commit and push", exact: true })).toBeEnabled();
 
-    await disclosure.click();
+    await tools.click();
     await expect(dock).toBeHidden();
   });
 
@@ -229,6 +220,7 @@ test.describe("snippets", () => {
   });
 
   const openPicker = async (page: import("@playwright/test").Page) => {
+    await openComposerTools(page);
     await page.getByLabel("Snippets", { exact: true }).click();
     await expect(page.getByLabel("Snippet name")).toBeVisible();
   };
@@ -305,22 +297,6 @@ for (const size of [{ width: 383, height: 678 }, { width: 890, height: 626 }]) {
   test.describe(`short screen ${size.width}x${size.height}`, () => {
     test.beforeEach(async ({ demo }) => {
       await demo.setViewportSize(size);
-    });
-
-    test("quick replies move to the input toolbar and still send", async ({ demo }) => {
-      await demo.getByRole("button", { name: "tailscale-docs" }).click();
-      const prompt = demo.getByPlaceholder("Message this agent…");
-      await expect(prompt).toBeVisible();
-      await expect(demo.locator("summary").filter({ hasText: "Quick replies" })).toHaveCount(0);
-
-      await prompt.fill("keep this draft");
-      await demo.getByRole("button", { name: "Quick replies", exact: true }).click();
-      const menu = demo.getByRole("region", { name: "Quick replies" });
-      const yes = menu.getByRole("button", { name: "yes", exact: true });
-      await expect(yes).toBeInViewport({ ratio: 1 });
-      await yes.click();
-      await expect(menu).toBeHidden();
-      await expect(prompt).toHaveValue("keep this draft");
     });
 
     test("a blocked question and the whole composer fit together", async ({ demo }) => {
