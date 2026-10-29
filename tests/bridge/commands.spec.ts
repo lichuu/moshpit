@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone } from "../fixtures";
+import { test, expect, openApp, seedHosts, loginBridge, pairBridge, isPhone, openComposerTools } from "../fixtures";
 
 const skill = (name: string, description: string) =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\nBody.\n`;
@@ -721,6 +721,7 @@ esac`,
     await page.getByRole("button", { name: /^claude/ }).first().click({ timeout: 20_000 });
     await prompt.waitFor({ state: "visible", timeout: 20_000 });
     await prompt.fill("draft");
+    await openComposerTools(page);
     await page.getByRole("button", { name: "Insert slash command", exact: true }).click();
     await expect(prompt).toHaveValue("draft /");
     await expect
@@ -884,6 +885,8 @@ esac`,
     await page.getByRole("button", { name: /^gemini/ }).first().click({ timeout: 20_000 });
     await prompt.waitFor({ state: "visible", timeout: 20_000 });
     const unavailable = page.getByRole("status").filter({ hasText: "Command discovery is unavailable for this agent." });
+    await expect(unavailable).toHaveCount(0);
+    await prompt.fill("/");
     await expect(unavailable).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
     await prompt.fill("type anyway");

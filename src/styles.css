@@ -245,9 +245,7 @@ html[data-layout="phone"][data-keyboard="true"] .pb-safe {
 .composer-wrap .composer-panel {
   margin-top: auto;
 }
-.composer-panel {
-  box-shadow: 0 3px 16px #00000006;
-}
+
 
 /* Compact: a phone layout under 520px of height, held landscape or with the
    keyboard up. */
@@ -298,8 +296,10 @@ html[data-layout="phone"][data-compact="true"] {
     & .terminal-composer .composer-panel > div {
       flex-shrink: 0;
     }
-    /* The attachment chip and the drop hint are not part of that row. */
+    /* The attachment chip, the tools tray and the drop hint are not part of
+       that row. */
     & .terminal-composer .composer-panel > .composer-attachment,
+    & .terminal-composer .composer-panel > .composer-tray,
     & .terminal-composer .composer-panel > p {
       flex: 0 0 100%;
       min-width: 0;

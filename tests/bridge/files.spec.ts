@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { test, expect, openApp, seedHosts, loginBridge, pairBridge, ROOT, type Bridge } from "../fixtures";
+import { test, expect, openApp, seedHosts, loginBridge, pairBridge, openComposerTools, ROOT, type Bridge } from "../fixtures";
 
 // C12: any file from the picker is copied to the host after a question, and
 // its quoted path joins the draft. The bridge is real, with a fixture herdr
@@ -58,6 +58,7 @@ async function start(page: Page, bridge: (options?: { herdr?: string }) => Promi
   mkdirSync(cwd);
   const host = await bridge({ herdr: herdrFor(agent("w1:p1", cwd, "s1")) });
   await connect(page, host);
+  await openComposerTools(page);
   return host;
 }
 

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test, expect, ROOT } from "../fixtures";
+import { test, expect, openComposerTools, ROOT } from "../fixtures";
 
 const FIXTURE = path.join(ROOT, "tests/fixtures/tiny.png");
 
@@ -31,7 +31,7 @@ test.describe("landscape composer fits", () => {
         panel: box($(".composer-panel")),
         textarea: box($(".composer-panel textarea")),
         send: box($('.composer-panel [aria-label="Send"]')),
-        quickReplies: box($(".quick-replies")),
+        quickReplies: box($('section[aria-label="Quick replies"]')),
         blockedBanner: box($(".composer-blocks > div.mb-2")),
         replyKeys: box($('[aria-label="Blocked reply controls"]')),
       };
@@ -45,7 +45,6 @@ test.describe("landscape composer fits", () => {
     const { height } = boxes.viewport;
     expect(boxes.send, "Send button").not.toBeNull();
     expect(boxes.textarea, "textarea").not.toBeNull();
-    expect(boxes.quickReplies, "quick replies").not.toBeNull();
     // The question card in Chat carries the prompt, so the composer adds no
     // banner that could push the Send row off a landscape phone.
     expect(boxes.blockedBanner, "blocked banner").toBeNull();
@@ -57,6 +56,7 @@ test.describe("landscape composer fits", () => {
   test("an idle agent keeps quick replies and the Send row inside the viewport", async ({ page }) => {
     await page.setViewportSize({ width: 844, height: 390 });
     await openAgent(page, "tailscale-docs");
+    await openComposerTools(page);
     const boxes = await composerBoxes(page);
     const { height } = boxes.viewport;
     expect(boxes.send, "Send button").not.toBeNull();
