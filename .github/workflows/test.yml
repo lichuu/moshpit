@@ -56,9 +56,12 @@ jobs:
       - name: Bridge suite against the release executable
         run: npm run test:release
 
-  # Playwright spreads the tests across four shards.
+  # Playwright spreads the tests across four shards. Pinned to 24.04: the
+  # lockfile's WebKit build links ICU 74, and ubuntu-latest is moving to
+  # 26.04, which ships ICU 78, so WebKit cannot start there. Unpin with a
+  # Playwright upgrade whose WebKit is built for 26.04.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
