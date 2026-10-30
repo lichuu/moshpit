@@ -547,7 +547,7 @@ export function PaneSurface({ target, bindSession = false, label, demoLines, lin
       tabIndex={0}
       role="application"
       aria-label={label}
-      className="terminal-pane min-h-0 min-w-0 flex-1 overflow-auto outline-none"
+      className="terminal-pane min-h-0 min-w-0 flex-1 overflow-auto bg-bg-term outline-none"
       onPaste={(e) => {
         e.preventDefault();
         takePaste(e.clipboardData);
